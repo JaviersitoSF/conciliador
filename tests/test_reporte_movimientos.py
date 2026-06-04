@@ -322,14 +322,26 @@ class ReporteMovimientosTests(unittest.TestCase):
                 patch("main.platform.system", return_value="Linux"), \
                 patch("main.subprocess.run") as run:
             main.imprimir_cheque_pdf("1", "2026-06-03", "A", "10")
-        run.assert_called_once_with(["xdg-open", "cheque_1.pdf"])
+        run.assert_called_once_with(
+            ["xdg-open", "cheque_1.pdf"],
+            stdout=main.subprocess.PIPE,
+            stderr=main.subprocess.PIPE,
+            text=True,
+            check=True,
+        )
         self.assertTrue(pdf.guardado)
 
         with patch("main.canvas.Canvas", return_value=PdfFalso()), \
                 patch("main.platform.system", return_value="Darwin"), \
                 patch("main.subprocess.run") as run:
             main.imprimir_cheque_pdf("2", "2026-06-03", "A", "10")
-        run.assert_called_once_with(["open", "cheque_2.pdf"])
+        run.assert_called_once_with(
+            ["open", "cheque_2.pdf"],
+            stdout=main.subprocess.PIPE,
+            stderr=main.subprocess.PIPE,
+            text=True,
+            check=True,
+        )
 
         with patch("main.canvas.Canvas", return_value=PdfFalso()), \
                 patch("main.platform.system", return_value="Windows"), \
@@ -342,6 +354,18 @@ class ReporteMovimientosTests(unittest.TestCase):
                 patch("main.os.startfile", None, create=True):
             _, salida = self.capturar(main.imprimir_cheque_pdf, "4", "2026-06-03", "A", "10")
         self.assertIn("Abre el PDF manual", salida)
+
+        error = main.subprocess.CalledProcessError(
+            1,
+            ["xdg-open", "cheque_5.pdf"],
+            stderr="chrome no pudo abrir el PDF",
+        )
+        with patch("main.canvas.Canvas", return_value=PdfFalso()), \
+                patch("main.platform.system", return_value="Linux"), \
+                patch("main.subprocess.run", side_effect=error):
+            _, salida = self.capturar(main.imprimir_cheque_pdf, "5", "2026-06-03", "A", "10")
+        self.assertIn("Abre el PDF manual", salida)
+        self.assertIn("chrome no pudo abrir el PDF", salida)
 
     def test_menu_clear_y_main(self):
         _, salida = self.capturar(main.clear_ide_terminal)

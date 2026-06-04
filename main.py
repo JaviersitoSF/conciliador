@@ -276,12 +276,28 @@ def imprimir_cheque_pdf(num, fecha, nombre, monto):
             else:
                 raise AttributeError("os.startfile no esta disponible en este entorno")
         elif platform.system() == "Darwin":
-            subprocess.run(["open", nombre_pdf])
+            abrir_pdf_silenciosamente(["open", nombre_pdf])
         else:
             print("🐧 Abriendo en Chrome OS...")
-            subprocess.run(["xdg-open", nombre_pdf])
+            abrir_pdf_silenciosamente(["xdg-open", nombre_pdf])
     except Exception as e:
         print(f"⚠️ Abre el PDF manual. Error: {e}")
+
+
+def abrir_pdf_silenciosamente(comando):
+    try:
+        subprocess.run(
+            comando,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        detalle = (e.stderr or e.stdout or "").strip()
+        if detalle:
+            raise RuntimeError(detalle) from e
+        raise RuntimeError(f"el comando fallo con codigo {e.returncode}") from e
 
 
 def guardar_en_archivo(num, fecha, nombre, monto):
