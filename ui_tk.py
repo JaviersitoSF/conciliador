@@ -54,19 +54,26 @@ class ConciliadorApp(tk.Tk):
         contenedor = ttk.Frame(self.tab_operaciones)
         contenedor.pack(fill="both", expand=True)
         contenedor.columnconfigure((0, 1), weight=1, uniform="ops")
-        contenedor.rowconfigure(1, weight=1)
+        contenedor.rowconfigure(2, weight=1)
 
         cheque = ttk.LabelFrame(contenedor, text="Emitir cheque", padding=14)
         cheque.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 12))
+        nota_debito = ttk.LabelFrame(contenedor, text="Registrar nota de débito", padding=14)
+        nota_debito.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 12))
         deposito = ttk.LabelFrame(contenedor, text="Registrar depósito", padding=14)
-        deposito.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 12))
+        deposito.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(0, 12))
         anular = ttk.LabelFrame(contenedor, text="Anular cheque", padding=14)
-        anular.grid(row=1, column=0, sticky="new", padx=(0, 8))
+        anular.grid(row=1, column=1, sticky="new", padx=(8, 0), pady=(0, 12))
 
         self.cheque_num = self._campo(cheque, "Número de cheque", 0)
         self.cheque_nombre = self._campo(cheque, "Páguese a", 1)
         self.cheque_monto = self._campo(cheque, "Monto", 2)
         ttk.Button(cheque, text="Emitir e imprimir", command=self.emitir_cheque).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+
+        self.nota_ref = self._campo(nota_debito, "Referencia", 0)
+        self.nota_desc = self._campo(nota_debito, "Descripción", 1)
+        self.nota_monto = self._campo(nota_debito, "Monto", 2)
+        ttk.Button(nota_debito, text="Registrar nota", command=self.registrar_nota_debito).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
 
         self.deposito_desc = self._campo(deposito, "Descripción", 0)
         self.deposito_monto = self._campo(deposito, "Monto", 1)
@@ -75,11 +82,11 @@ class ConciliadorApp(tk.Tk):
         self.anular_num = self._campo(anular, "Número de cheque", 0)
         ttk.Button(anular, text="Marcar como anulado", command=self.anular_cheque).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
 
-        historial = ttk.LabelFrame(contenedor, text="Cheques recientes", padding=10)
-        historial.grid(row=1, column=1, sticky="nsew", padx=(8, 0))
+        historial = ttk.LabelFrame(contenedor, text="Egresos recientes", padding=10)
+        historial.grid(row=2, column=0, columnspan=2, sticky="nsew")
         historial.rowconfigure(0, weight=1)
         historial.columnconfigure(0, weight=1)
-        self.tabla_cheques = self._tabla(historial, ("Num", "Fecha", "Nombre", "Monto", "Estado"))
+        self.tabla_cheques = self._tabla(historial, ("Num", "Fecha", "Nombre", "Monto", "Estado", "Tipo"))
 
     def _crear_reporte(self):
         metricas = ttk.Frame(self.tab_reporte, style="Panel.TFrame", padding=12)
@@ -97,11 +104,11 @@ class ConciliadorApp(tk.Tk):
         cuerpo.columnconfigure((0, 1), weight=1, uniform="report")
         cuerpo.rowconfigure(0, weight=1)
 
-        cheques = ttk.LabelFrame(cuerpo, text="Cheques del mes", padding=10)
+        cheques = ttk.LabelFrame(cuerpo, text="Egresos del mes", padding=10)
         cheques.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         cheques.rowconfigure(0, weight=1)
         cheques.columnconfigure(0, weight=1)
-        self.tabla_reporte_cheques = self._tabla(cheques, ("Num", "Fecha", "Nombre", "Monto", "Estado"))
+        self.tabla_reporte_cheques = self._tabla(cheques, ("Num", "Fecha", "Nombre", "Monto", "Estado", "Tipo"))
 
         depositos = ttk.LabelFrame(cuerpo, text="Depósitos del mes", padding=10)
         depositos.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
@@ -113,19 +120,20 @@ class ConciliadorApp(tk.Tk):
         acciones = ttk.Frame(self.tab_conciliacion)
         acciones.pack(fill="x", pady=(0, 12))
         ttk.Button(acciones, text="Conciliar con estado_cuenta.xlsx", command=self.conciliar).pack(side="left")
+        ttk.Button(acciones, text="Generar PDF", command=self.generar_pdf_conciliacion).pack(side="left", padx=(8, 0))
 
         panel = ttk.Frame(self.tab_conciliacion)
         panel.pack(fill="both", expand=True)
         panel.columnconfigure((0, 1), weight=1, uniform="conc")
         panel.rowconfigure(0, weight=1)
 
-        cheques = ttk.LabelFrame(panel, text="Resultados de cheques emitidos", padding=10)
+        cheques = ttk.LabelFrame(panel, text="Resultados de egresos emitidos", padding=10)
         cheques.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         cheques.rowconfigure(0, weight=1)
         cheques.columnconfigure(0, weight=1)
         self.tabla_conciliacion = self._tabla(cheques, ("Num", "Resultado", "Mensaje"))
 
-        banco = ttk.LabelFrame(panel, text="Cargos no registrados", padding=10)
+        banco = ttk.LabelFrame(panel, text="Movimientos no registrados", padding=10)
         banco.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         banco.rowconfigure(0, weight=1)
         banco.columnconfigure(0, weight=1)
@@ -177,6 +185,22 @@ class ConciliadorApp(tk.Tk):
         self.refrescar_todo()
         messagebox.showinfo("Depósito registrado", resultado["mensaje"])
 
+    def registrar_nota_debito(self):
+        try:
+            resultado = core.registrar_nota_debito_datos(
+                self.nota_ref.get(),
+                self.nota_desc.get(),
+                self.nota_monto.get(),
+            )
+        except Exception as e:
+            messagebox.showerror("No se pudo registrar", str(e))
+            return
+        self.nota_ref.delete(0, tk.END)
+        self.nota_desc.delete(0, tk.END)
+        self.nota_monto.delete(0, tk.END)
+        self.refrescar_todo()
+        messagebox.showinfo("Nota de débito registrada", resultado["mensaje"])
+
     def anular_cheque(self):
         try:
             resultado = core.anular_cheque_numero(self.anular_num.get())
@@ -197,9 +221,27 @@ class ConciliadorApp(tk.Tk):
             return
         for fila in resultado["cheques"]:
             self.tabla_conciliacion.insert("", tk.END, values=(fila["num"], fila["resultado"], fila["mensaje"]))
+        for fila in resultado["depositos"]:
+            self.tabla_conciliacion.insert(
+                "",
+                tk.END,
+                values=(fila["descripcion"], fila["resultado"], fila["mensaje"]),
+            )
         for fila in resultado["no_registrados"]:
             monto = core.formatear_monto(fila["monto"]) if fila["monto"] is not None else "N/D"
             self.tabla_no_registrados.insert("", tk.END, values=(fila["num"], monto, fila["mensaje"]))
+
+    def generar_pdf_conciliacion(self):
+        try:
+            resultado = core.obtener_conciliacion()
+            nombre_pdf = core.generar_pdf_conciliacion(resultado)
+        except Exception as e:
+            messagebox.showerror("Conciliación", str(e))
+            return
+        messagebox.showinfo(
+            "PDF generado",
+            f"Reporte de conciliación generado:\n{nombre_pdf}",
+        )
 
     def refrescar_todo(self):
         self._cargar_cheques()
@@ -214,7 +256,7 @@ class ConciliadorApp(tk.Tk):
             self.tabla_cheques.insert(
                 "",
                 tk.END,
-                values=(fila["Num"], fila["Fecha"], fila["Nombre"], fila["Monto"], fila["Estado"]),
+                values=(fila["Num"], fila["Fecha"], fila["Nombre"], fila["Monto"], fila["Estado"], fila["Tipo"]),
             )
 
     def _cargar_reporte(self):
@@ -228,7 +270,7 @@ class ConciliadorApp(tk.Tk):
             self.tabla_reporte_cheques.insert(
                 "",
                 tk.END,
-                values=(fila["Num"], fila["Fecha"], fila["Nombre"], fila["Monto"], fila["Estado"]),
+                values=(fila["Num"], fila["Fecha"], fila["Nombre"], fila["Monto"], fila["Estado"], fila["Tipo"]),
             )
 
         self._limpiar_tabla(self.tabla_reporte_depositos)

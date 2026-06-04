@@ -6,11 +6,13 @@ from main import (
     clear_ide_terminal,
     conciliar_cuentas,
     guardar_en_archivo,
+    imprimir_conciliacion,
     imprimir_cheque_pdf,
     main,
     mostrar_menu,
     registrar_deposito,
     registrar_e_imprimir,
+    registrar_nota_debito,
     reporte_movimientos,
 )
 

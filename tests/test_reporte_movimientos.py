@@ -5,9 +5,12 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
+import shutil
+from openpyxl import Workbook
 
 import main
 
@@ -41,7 +44,7 @@ class ReporteMovimientosTests(unittest.TestCase):
     def test_reporte_sin_archivos_no_usa_dt_sobre_object(self):
         salida = self.ejecutar_reporte()
 
-        self.assertIn("No hay cheques registrados en el mes actual.", salida)
+        self.assertIn("No hay cheques ni notas de débito registrados en el mes actual.", salida)
         self.assertIn("No hay depósitos registrados en el mes actual.", salida)
         self.assertIn("SALDO EN B", salida)
         self.assertFalse(os.path.exists(main.ARCHIVO_CHEQUES))
@@ -53,7 +56,7 @@ class ReporteMovimientosTests(unittest.TestCase):
 
         salida = self.ejecutar_reporte()
 
-        self.assertIn("No hay cheques registrados en el mes actual.", salida)
+        self.assertIn("No hay cheques ni notas de débito registrados en el mes actual.", salida)
         self.assertIn("No hay depósitos registrados en el mes actual.", salida)
 
     def test_cargadores_devuelven_fecha_datetime_aun_vacios(self):
@@ -73,6 +76,7 @@ class ReporteMovimientosTests(unittest.TestCase):
             [
                 ["100", fecha_mes, "PROVEEDOR UNO", "Q 150.25", "TRANSITO"],
                 ["101", fecha_mes, "ERROR", "999.00", "ANULADO"],
+                ["ND-1", fecha_mes, "SERVICIO BANCO", "75.00", "TRANSITO", main.TIPO_NOTA_DEBITO],
                 ["102", fecha_otro_mes, "FUERA DE MES", "25.00", "TRANSITO"],
                 ["103", "no-es-fecha", "SIN FECHA", "10.00", "TRANSITO"],
                 ["104", fecha_mes, "SIN MONTO", "malo", "TRANSITO"],
@@ -93,12 +97,14 @@ class ReporteMovimientosTests(unittest.TestCase):
 
         self.assertIn("100", salida)
         self.assertIn("101", salida)
+        self.assertIn("ND-1", salida)
+        self.assertIn(main.TIPO_NOTA_DEBITO, salida)
         self.assertNotIn("102", salida)
         self.assertIn("TOTAL INGRESOS", salida)
         self.assertIn("Q 500.50", salida)
         self.assertIn("TOTAL EGRESOS", salida)
-        self.assertIn("Q 150.25", salida)
-        self.assertIn("Q 350.25", salida)
+        self.assertIn("Q 225.25", salida)
+        self.assertIn("Q 275.25", salida)
 
     def test_registro_deposito_y_cheque_escriben_en_cwd_actual(self):
         with patch("main.datetime") as fake_datetime:
@@ -172,6 +178,7 @@ class ReporteMovimientosTests(unittest.TestCase):
 
         self.assertEqual(len(cheques), 2)
         self.assertEqual(cheques.iloc[0]["Estado"], "TRANSITO")
+        self.assertEqual(cheques.iloc[0]["Tipo"], main.TIPO_CHEQUE)
         self.assertEqual(cheques.iloc[0]["Num_norm"], "1")
         self.assertEqual(cheques.iloc[0]["Monto_valor"], Decimal("10.00"))
         self.assertTrue(pd.isna(cheques.iloc[1]["Fecha_dt"]))
@@ -179,20 +186,19 @@ class ReporteMovimientosTests(unittest.TestCase):
         self.assertEqual(depositos.iloc[0]["Monto_valor"], Decimal("20.00"))
 
     def test_cargadores_manejan_emptydataerror_y_columnas_faltantes(self):
-        with patch("main.pd.read_csv", side_effect=pd.errors.EmptyDataError("vacio")):
-            open(main.ARCHIVO_CHEQUES, "w", encoding="utf-8").close()
-            open(main.ARCHIVO_DEPOSITOS, "w", encoding="utf-8").close()
-            self.assertTrue(main.cargar_cheques_registrados().empty)
-            self.assertTrue(main.cargar_depositos_registrados().empty)
+        open(main.ARCHIVO_CHEQUES, "w", encoding="utf-8").close()
+        open(main.ARCHIVO_DEPOSITOS, "w", encoding="utf-8").close()
+        self.assertTrue(main.cargar_cheques_registrados().empty)
+        self.assertTrue(main.cargar_depositos_registrados().empty)
 
-        with patch("main.pd.read_csv", return_value=pd.DataFrame({"Num": ["1"]})):
-            df = main.cargar_cheques_registrados()
-            self.assertIn("Fecha", df.columns)
-            self.assertEqual(df.iloc[0]["Estado"], "TRANSITO")
+        self.escribir_csv(main.ARCHIVO_CHEQUES, [["1"]])
+        df = main.cargar_cheques_registrados()
+        self.assertIn("Fecha", df.columns)
+        self.assertEqual(df.iloc[0]["Estado"], "TRANSITO")
 
-        with patch("main.pd.read_csv", return_value=pd.DataFrame({"Fecha": ["2026-06-03"]})):
-            df = main.cargar_depositos_registrados()
-            self.assertIn("Monto", df.columns)
+        self.escribir_csv(main.ARCHIVO_DEPOSITOS, [["2026-06-03"]])
+        df = main.cargar_depositos_registrados()
+        self.assertIn("Monto", df.columns)
 
     def test_cheque_ya_registrado(self):
         self.assertFalse(main.cheque_ya_registrado("1"))
@@ -200,6 +206,29 @@ class ReporteMovimientosTests(unittest.TestCase):
         self.assertTrue(main.cheque_ya_registrado("1"))
         with patch("main.cargar_cheques_registrados", return_value=pd.DataFrame({"Otra": []})):
             self.assertFalse(main.cheque_ya_registrado("1"))
+
+    def test_registrar_nota_debito_datos(self):
+        resultado = main.registrar_nota_debito_datos(" nd-9 ", " pago de luz ", "125.50", fecha="2026-06-03")
+
+        self.assertEqual(resultado["referencia"], "ND-9")
+        self.assertEqual(resultado["descripcion"], "PAGO DE LUZ")
+        self.assertTrue(main.nota_debito_ya_registrada("nd-9"))
+
+        df = main.cargar_cheques_registrados()
+        self.assertEqual(df.iloc[0]["Num"], "ND-9")
+        self.assertEqual(df.iloc[0]["Tipo"], main.TIPO_NOTA_DEBITO)
+
+        reporte = main.obtener_reporte_movimientos(fecha="2026-06-03")
+        self.assertEqual(reporte["total_cheques"], Decimal("125.50"))
+
+        with self.assertRaises(main.ErrorOperacion):
+            main.registrar_nota_debito_datos("ND-9", "otro pago", "1", fecha="2026-06-03")
+        with self.assertRaises(main.ErrorOperacion):
+            main.registrar_nota_debito_datos("", "pago", "1")
+        with self.assertRaises(main.ErrorOperacion):
+            main.registrar_nota_debito_datos("ND-10", "", "1")
+        with self.assertRaises(main.ErrorOperacion):
+            main.registrar_nota_debito_datos("ND-10", "pago", "malo")
 
     def test_registrar_e_imprimir_flujos(self):
         with patch("builtins.input", side_effect=["10", "proveedor", "9"]), \
@@ -221,6 +250,14 @@ class ReporteMovimientosTests(unittest.TestCase):
             _, salida = self.capturar(main.registrar_e_imprimir)
         self.assertIn("listo para imprimir", salida)
         self.assertTrue(os.path.exists(main.ARCHIVO_CHEQUES))
+
+    def test_registrar_nota_debito_flujo_interactivo(self):
+        with patch("builtins.input", side_effect=["25", "servicio banco", "nd-1"]):
+            _, salida = self.capturar(main.registrar_nota_debito)
+
+        self.assertIn("Nota de débito registrada", salida)
+        df = main.cargar_cheques_registrados()
+        self.assertEqual(df.iloc[0]["Tipo"], main.TIPO_NOTA_DEBITO)
 
     def test_anular_cheque_flujos(self):
         _, salida = self.capturar(main.anular_cheque)
@@ -306,6 +343,130 @@ class ReporteMovimientosTests(unittest.TestCase):
             _, salida = self.capturar(main.conciliar_cuentas)
         self.assertIn("Cheque 7 cobrado perfectamente", salida)
 
+    def test_estado_cuenta_csv_banco_con_preambulo_se_normaliza(self):
+        self.escribir_csv(main.ARCHIVO_CHEQUES, [["889", "2026-05-11", "AGENCIA CORTIJO", "1406.14", "TRANSITO"]])
+        self.escribir_csv(main.ARCHIVO_DEPOSITOS, [["2026-05-07", "EPA CARRETERA S", "1242.00"]])
+        self.escribir_csv(
+            "1595-JAVIER_2070036814_2026647454.csv",
+            [
+                ["Tipo de Transacciones", ""],
+                ["", "DE = Depósito", "", "", "CQ = Pago de Cheque"],
+                ["", "NC = Nota de Crédito", "", "", "ND = Nota de Débito"],
+                [],
+                ["Cuenta: 0000000000 - EJEMPLO"],
+                ["Saldo inicial (GTQ): 2537.63"],
+                ["Del 01/05/2026 al 31/05/2026"],
+                [],
+                ["Fecha", "TT", "Descripción", "No. Doc", "Debe (GTQ)", "Haber (GTQ)", "Saldo (GTQ)"],
+                ["07-05-2026", "DE", "EPA CARRETERA S", "61385769", "", "1242.00", "4704.92"],
+                ["11-05-2026", "CQ", "AGENCIA CORTIJO", "889", "1406.14", "", "6416.03"],
+                ["12-05-2026", "NC", "VISANET", "141919", "", "188.29", "6604.32"],
+            ],
+        )
+
+        banco = main.cargar_estado_cuenta_banco()
+        self.assertEqual(len(banco), 3)
+        self.assertEqual(banco.iloc[0]["Tipo_movimiento"], "CREDITO")
+        self.assertEqual(banco.iloc[1]["Tipo_movimiento"], "DEBITO")
+        self.assertEqual(banco.iloc[1]["Num_norm"], "889")
+        self.assertEqual(banco.iloc[1]["Monto_valor"], Decimal("1406.14"))
+
+        resultado = main.obtener_conciliacion()
+        self.assertIn("cobrado perfectamente", resultado["cheques"][0]["mensaje"])
+        self.assertIn("acreditado en banco", resultado["depositos"][0]["mensaje"])
+        self.assertEqual(len(resultado["no_registrados"]), 1)
+        self.assertIn("Crédito NC", resultado["no_registrados"][0]["mensaje"])
+
+    def test_buscar_archivo_estado_cuenta_prefiere_transacciones_xls(self):
+        origen = Path(__file__).resolve().parents[1] / "Transacciones del mes.xls"
+        shutil.copy2(origen, "Transacciones del mes.xls")
+        pd.DataFrame({"Otra": [1]}).to_excel(main.ARCHIVO_BANCO, index=False)
+
+        self.assertEqual(main.buscar_archivo_estado_cuenta(), "Transacciones del mes.xls")
+
+        banco = main.cargar_estado_cuenta_banco()
+        self.assertGreater(len(banco), 0)
+        self.assertEqual(banco.iloc[0]["TT"], "CREDITO")
+        self.assertEqual(banco.iloc[0]["Tipo_movimiento"], "CREDITO")
+
+    def test_concilia_nota_debito_por_referencia_en_csv_banco(self):
+        main.registrar_nota_debito_datos("ND-9", "Pago directo banco", "25.00", fecha="2026-05-12")
+        self.escribir_csv(
+            main.ARCHIVO_BANCO_CSV,
+            [
+                ["Fecha", "TT", "Descripción", "No. Doc", "Debe (GTQ)", "Haber (GTQ)", "Saldo (GTQ)"],
+                ["12-05-2026", "ND", "PAGO DIRECTO BANCO", "ND-9", "25.00", "", "100.00"],
+            ],
+        )
+
+        resultado = main.obtener_conciliacion()
+
+        self.assertEqual(resultado["cheques"][0]["resultado"], "COBRADO")
+        self.assertIn("Nota de débito ND-9", resultado["cheques"][0]["mensaje"])
+        self.assertEqual(resultado["no_registrados"], [])
+
+    def test_conciliacion_marca_maestro_como_reconciliado(self):
+        main.guardar_en_archivo("10", "2026-06-03", "PROVEEDOR", Decimal("100.00"))
+        main.registrar_deposito_datos("200.00", "VENTA", fecha="2026-06-03")
+        pd.DataFrame(
+            {
+                "Fecha": ["2026-06-03", "2026-06-03"],
+                "TT": ["CQ", "DE"],
+                "Descripción": ["PROVEEDOR", "VENTA"],
+                "No. Doc": ["10", "2001"],
+                "Debe (GTQ)": ["100.00", ""],
+                "Haber (GTQ)": ["", "200.00"],
+                "Saldo (GTQ)": ["900.00", "1100.00"],
+            }
+        ).to_excel(main.ARCHIVO_BANCO, index=False)
+
+        _, salida = self.capturar(main.conciliar_cuentas)
+        self.assertIn("cobrado perfectamente", salida)
+        self.assertIn("acreditado en banco", salida)
+
+        cheques = main.cargar_cheques_registrados()
+        depositos = main.cargar_depositos_registrados()
+        self.assertEqual(cheques.iloc[0]["Conciliacion"], main.ESTADO_RECONCILIADO)
+        self.assertEqual(depositos.iloc[0]["Conciliacion"], main.ESTADO_RECONCILIADO)
+        with open(main.ARCHIVO_CHEQUES, encoding="utf-8") as archivo:
+            self.assertIn("RECONCILIADO", archivo.read())
+        with open(main.ARCHIVO_DEPOSITOS, encoding="utf-8") as archivo:
+            self.assertIn("RECONCILIADO", archivo.read())
+
+    def test_generar_pdf_conciliacion(self):
+        resultado = {
+            "cheques": [
+                {"mensaje": "✅ Cheque 10 cobrado perfectamente."},
+                {"mensaje": "⚠️ ¡Ojo! Cheque 11 diferencia: Nuestro Q 10.00 | Banco Q 9.00"},
+            ],
+            "depositos": [
+                {"mensaje": "✅ Depósito VENTA por Q 200.00 acreditado en banco."},
+            ],
+            "no_registrados": [
+                {"mensaje": "❓ Cargo ND 12 por Q 5.00 aparece en banco, pero NO está en nuestro sistema."},
+            ],
+        }
+
+        nombre_pdf = main.generar_pdf_conciliacion(
+            resultado,
+            fecha="2026-06-03 10:30:00",
+            nombre_pdf="conciliacion_test.pdf",
+        )
+
+        self.assertEqual(nombre_pdf, "conciliacion_test.pdf")
+        self.assertTrue(os.path.exists(nombre_pdf))
+        with open(nombre_pdf, "rb") as archivo:
+            self.assertEqual(archivo.read(4), b"%PDF")
+
+    def test_imprimir_conciliacion_genera_pdf(self):
+        resultado = {"cheques": [], "depositos": [], "no_registrados": []}
+        with patch("main.obtener_conciliacion", return_value=resultado), \
+                patch("main.generar_pdf_conciliacion", return_value="conciliacion_prueba.pdf"):
+            _, salida = self.capturar(main.imprimir_conciliacion)
+
+        self.assertIn("Reporte de conciliación generado", salida)
+        self.assertIn("conciliacion_prueba.pdf", salida)
+
     def test_imprimir_cheque_pdf_sin_abrir_programas_reales(self):
         class PdfFalso:
             def __init__(self):
@@ -376,10 +537,12 @@ class ReporteMovimientosTests(unittest.TestCase):
 
         acciones = {
             "1": "registrar_e_imprimir",
-            "2": "registrar_deposito",
-            "3": "conciliar_cuentas",
-            "4": "anular_cheque",
-            "5": "reporte_movimientos",
+            "2": "registrar_nota_debito",
+            "3": "registrar_deposito",
+            "4": "conciliar_cuentas",
+            "5": "anular_cheque",
+            "6": "reporte_movimientos",
+            "7": "imprimir_conciliacion",
         }
         for opcion, funcion in acciones.items():
             with patch("builtins.input", return_value=opcion), \
@@ -387,7 +550,7 @@ class ReporteMovimientosTests(unittest.TestCase):
                     self.assertRaises(SystemExit):
                 main.main()
 
-        with patch("builtins.input", side_effect=["x", "6"]), self.assertRaises(SystemExit):
+        with patch("builtins.input", side_effect=["x", "8"]), self.assertRaises(SystemExit):
             main.main()
 
 
