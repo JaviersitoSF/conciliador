@@ -908,9 +908,9 @@ def obtener_conciliacion():
             debitos = df_banco[df_banco["Tipo_movimiento"] == "DEBITO"].copy()
 
             if tipo == TIPO_NOTA_DEBITO:
-                cobrado = debitos[debitos["Referencia_norm"].eq(referencia_norm)]
+                cobrado = debitos.query("Referencia_norm == @referencia_norm").copy()
             else:
-                cobrado = debitos[debitos["Num_norm"].eq(num)]
+                cobrado = debitos.query("Num_norm == @num").copy()
 
             monto_nuestro = fila["Monto_valor"]
             fecha_nuestra = fila.get("Fecha_dt")
@@ -1087,7 +1087,8 @@ def limpiar_texto_pdf(texto):
     return texto.encode("latin-1", errors="ignore").decode("latin-1")
 
 
-def dividir_texto_pdf(texto, ancho=100):
+def dividir_texto_pdf(texto, ancho: float = 100.0):
+    ancho_int = int(ancho)
     palabras = limpiar_texto_pdf(texto).split()
     if not palabras:
         return [""]
@@ -1096,7 +1097,7 @@ def dividir_texto_pdf(texto, ancho=100):
     actual = ""
     for palabra in palabras:
         candidata = f"{actual} {palabra}".strip()
-        if len(candidata) <= ancho:
+        if len(candidata) <= ancho_int:
             actual = candidata
             continue
 
@@ -1131,7 +1132,7 @@ def generar_pdf_conciliacion(resultado, fecha=None, nombre_pdf=None):
         pdf.showPage()
         y = alto_pagina - 2 * cm
 
-    def escribir(texto, fuente="Helvetica", tamano=10, salto=0.45 * cm, indent=0, ancho=100):
+    def escribir(texto, fuente="Helvetica", tamano=10.0, salto=0.45 * cm, indent=0.0, ancho=100.0):
         nonlocal y
         pdf.setFont(fuente, tamano)
         for linea in dividir_texto_pdf(texto, ancho=ancho):
@@ -1151,9 +1152,10 @@ def generar_pdf_conciliacion(resultado, fecha=None, nombre_pdf=None):
         escribir(titulo, "Helvetica-Bold", 12, salto=0.55 * cm)
         if filas:
             for fila in filas:
-                escribir(f"- {fila['mensaje']}", indent=0.35 * cm, ancho=94)
+                mensaje = fila.get("mensaje", "") if isinstance(fila, dict) else str(fila)
+                escribir("- " + str(mensaje), indent=0.35 * cm, ancho=94)
         else:
-            escribir(mensaje_vacio, indent=0.35 * cm)
+            escribir(str(mensaje_vacio), indent=0.35 * cm)
         espacio()
 
     escribir("REPORTE DE CONCILIACION BANCARIA", "Helvetica-Bold", 15, salto=0.65 * cm)
