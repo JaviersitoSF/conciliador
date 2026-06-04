@@ -258,7 +258,11 @@ def imprimir_cheque_pdf(num, fecha, nombre, monto):
 
     try:
         if platform.system() == "Windows":
-            os.startfile(nombre_pdf, "print")
+            startfile = getattr(os, "startfile", None)
+            if callable(startfile):
+                startfile(nombre_pdf, "print")
+            else:
+                raise AttributeError("os.startfile no esta disponible en este entorno")
         elif platform.system() == "Darwin":
             subprocess.run(["open", nombre_pdf])
         else:
