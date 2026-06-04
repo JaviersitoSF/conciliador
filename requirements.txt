@@ -2,3 +2,5 @@ pandas
 openpyxl
 num2words
 reportlab
+pytest
+coverage

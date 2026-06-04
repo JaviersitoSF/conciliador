@@ -16,6 +16,13 @@ ARCHIVO_BANCO = "estado_cuenta.xlsx"
 ARCHIVO_DEPOSITOS = "depositos.csv"
 
 
+def crear_dataframe_vacio(columnas):
+    df = pd.DataFrame(columns=columnas + ["Monto_valor", "Fecha_dt"])
+    df["Monto_valor"] = pd.Series(dtype=object)
+    df["Fecha_dt"] = pd.to_datetime(pd.Series(dtype=object))
+    return df
+
+
 def convertir_monto(valor):
     if valor is None:
         return None
@@ -142,7 +149,8 @@ def pedir_numero_cheque(mensaje):
 
 def cargar_cheques_registrados():
     columnas = ["Num", "Fecha", "Nombre", "Monto", "Estado"]
-    vacio = pd.DataFrame(columns=columnas + ["Num_norm", "Monto_valor", "Fecha_dt"])
+    vacio = crear_dataframe_vacio(columnas)
+    vacio["Num_norm"] = pd.Series(dtype=object)
 
     if not os.path.exists(ARCHIVO_CHEQUES):
         return vacio
@@ -161,12 +169,14 @@ def cargar_cheques_registrados():
     if df.empty:
         return vacio
 
+    for columna in columnas:
+        if columna not in df.columns:
+            df[columna] = ""
+
     df = df.fillna("")
     df = df[df[columnas].apply(lambda fila: any(str(valor).strip() for valor in fila), axis=1)].copy()
 
     for columna in columnas:
-        if columna not in df.columns:
-            df[columna] = ""
         df[columna] = df[columna].astype(str).str.strip()
 
     df["Estado"] = df["Estado"].str.upper()
@@ -180,7 +190,7 @@ def cargar_cheques_registrados():
 
 def cargar_depositos_registrados():
     columnas = ["Fecha", "Descripcion", "Monto"]
-    vacio = pd.DataFrame(columns=columnas + ["Monto_valor", "Fecha_dt"])
+    vacio = crear_dataframe_vacio(columnas)
 
     if not os.path.exists(ARCHIVO_DEPOSITOS):
         return vacio
@@ -199,12 +209,14 @@ def cargar_depositos_registrados():
     if df.empty:
         return vacio
 
+    for columna in columnas:
+        if columna not in df.columns:
+            df[columna] = ""
+
     df = df.fillna("")
     df = df[df[columnas].apply(lambda fila: any(str(valor).strip() for valor in fila), axis=1)].copy()
 
     for columna in columnas:
-        if columna not in df.columns:
-            df[columna] = ""
         df[columna] = df[columna].astype(str).str.strip()
 
     df["Descripcion"] = df["Descripcion"].str.upper()
@@ -500,5 +512,5 @@ def main():
             print("⚠️ Opción inválida. Intenta un número del 1 al 6.")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
