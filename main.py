@@ -16,6 +16,10 @@ ARCHIVO_BANCO = "estado_cuenta.xlsx"
 ARCHIVO_DEPOSITOS = "depositos.csv"
 
 
+class ErrorOperacion(ValueError):
+    """Error esperado en operaciones del sistema."""
+
+
 def crear_dataframe_vacio(columnas):
     df = pd.DataFrame(columns=columnas + ["Monto_valor", "Fecha_dt"])
     df["Monto_valor"] = pd.Series(dtype=object)
@@ -233,18 +237,38 @@ def cheque_ya_registrado(numero):
     return df["Num_norm"].eq(numero).any()
 
 
-def registrar_deposito():
-    print("\n--- REGISTRO DE DEPÓSITO ---")
-    fecha_actual = datetime.now().strftime("%Y-%m-%d")
+def registrar_deposito_datos(monto, descripcion, fecha=None):
+    monto = convertir_monto(monto)
+    if monto is None:
+        raise ErrorOperacion("⚠️ Error: Solo usar números y punto decimal.")
+    if monto <= 0:
+        raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
 
-    monto = pedir_monto_positivo("Monto del depósito (ej. 5000.00): ")
-    descripcion = pedir_texto_no_vacio("Descripción (ej. Venta mostrador, Eukanuba): ").upper()
+    descripcion = str(descripcion or "").strip()
+    if not descripcion:
+        raise ErrorOperacion("⚠️ Error: el campo no puede quedar vacío.")
+
+    fecha = fecha or datetime.now().strftime("%Y-%m-%d")
+    descripcion = descripcion.upper()
 
     with open(ARCHIVO_DEPOSITOS, mode="a", newline="", encoding="utf-8") as f:
         escritor = csv.writer(f)
-        escritor.writerow([fecha_actual, descripcion, formatear_monto(monto)])
+        escritor.writerow([fecha, descripcion, formatear_monto(monto)])
 
-    print(f"✅ Depósito de Q {formatear_monto(monto)} registrado con éxito.")
+    return {
+        "fecha": fecha,
+        "descripcion": descripcion,
+        "monto": monto,
+        "mensaje": f"✅ Depósito de Q {formatear_monto(monto)} registrado con éxito.",
+    }
+
+
+def registrar_deposito():
+    print("\n--- REGISTRO DE DEPÓSITO ---")
+    monto = pedir_monto_positivo("Monto del depósito (ej. 5000.00): ")
+    descripcion = pedir_texto_no_vacio("Descripción (ej. Venta mostrador, Eukanuba): ").upper()
+    resultado = registrar_deposito_datos(monto, descripcion)
+    print(resultado["mensaje"])
 
 
 def imprimir_cheque_pdf(num, fecha, nombre, monto):
@@ -307,6 +331,46 @@ def guardar_en_archivo(num, fecha, nombre, monto):
     print("💾 Datos guardados en el historial (CSV).")
 
 
+def guardar_cheque_en_archivo(num, fecha, nombre, monto):
+    with open(ARCHIVO_CHEQUES, mode="a", newline="", encoding="utf-8") as f:
+        escritor = csv.writer(f)
+        escritor.writerow([num, fecha, nombre, formatear_monto(monto), "TRANSITO"])
+
+
+def emitir_cheque_datos(num_cheque, nombre, monto, fecha=None):
+    num_cheque = normalizar_numero_cheque(num_cheque)
+    if not num_cheque:
+        raise ErrorOperacion("⚠️ Error: el número de cheque debe ser mayor que cero.")
+
+    nombre = str(nombre or "").strip()
+    if not nombre:
+        raise ErrorOperacion("⚠️ Error: el campo no puede quedar vacío.")
+
+    monto = convertir_monto(monto)
+    if monto is None:
+        raise ErrorOperacion("⚠️ Error: Solo usar números y punto decimal.")
+    if monto <= 0:
+        raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
+
+    if cheque_ya_registrado(num_cheque):
+        raise ErrorOperacion(f"⚠️ El cheque {num_cheque} ya existe en el historial.")
+
+    fecha = fecha or datetime.now().strftime("%Y-%m-%d")
+    nombre = nombre.upper()
+
+    imprimir_cheque_pdf(num_cheque, fecha, nombre, monto)
+    guardar_cheque_en_archivo(num_cheque, fecha, nombre, monto)
+
+    return {
+        "num": num_cheque,
+        "fecha": fecha,
+        "nombre": nombre,
+        "monto": monto,
+        "pdf": f"cheque_{num_cheque}.pdf",
+        "mensaje": "✅ Cheque registrado y listo para imprimir con éxito.",
+    }
+
+
 def registrar_e_imprimir():
     print("\n--- EMISIÓN DE CHEQUE ---")
 
@@ -329,24 +393,22 @@ def registrar_e_imprimir():
     print("✅ Cheque registrado y listo para imprimir con éxito.")
 
 
-def anular_cheque():
-    print("\n--- ANULAR CHEQUE ---")
-
+def anular_cheque_numero(num_anular):
     if not os.path.exists(ARCHIVO_CHEQUES):
-        print("⚠️ No hay registro de cheques aún.")
-        return
+        raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
 
-    num_anular = pedir_numero_cheque("Ingresa el número de cheque que deseas anular: ")
+    num_anular = normalizar_numero_cheque(num_anular)
+    if not num_anular:
+        raise ErrorOperacion("⚠️ Error: el número de cheque debe ser mayor que cero.")
+
     df = cargar_cheques_registrados()
 
     if df.empty:
-        print("⚠️ No hay registro de cheques aún.")
-        return
+        raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
 
     coincidencias = df["Num_norm"].eq(num_anular)
     if not coincidencias.any():
-        print(f"⚠️ El cheque {num_anular} no existe en los registros.")
-        return
+        raise ErrorOperacion(f"⚠️ El cheque {num_anular} no existe en los registros.")
 
     df.loc[coincidencias, "Estado"] = "ANULADO"
     df[["Num", "Fecha", "Nombre", "Monto", "Estado"]].to_csv(
@@ -357,17 +419,32 @@ def anular_cheque():
 
     cantidad = int(coincidencias.sum())
     if cantidad > 1:
-        print(f"⚠️ El número {num_anular} aparecía {cantidad} veces y quedó marcado como ANULADO.")
+        mensaje = f"⚠️ El número {num_anular} aparecía {cantidad} veces y quedó marcado como ANULADO."
     else:
-        print(f"🚫 ¡Hecho! El cheque {num_anular} ha sido marcado como ANULADO.")
+        mensaje = f"🚫 ¡Hecho! El cheque {num_anular} ha sido marcado como ANULADO."
+
+    return {"num": num_anular, "cantidad": cantidad, "mensaje": mensaje}
 
 
-def conciliar_cuentas():
-    print("\n--- CONCILIACIÓN BANCARIA ---")
+def anular_cheque():
+    print("\n--- ANULAR CHEQUE ---")
 
-    if not os.path.exists(ARCHIVO_CHEQUES) or not os.path.exists(ARCHIVO_BANCO):
-        print("⚠️ Faltan archivos. Asegúrate de tener registros y estado de cuenta.")
+    if not os.path.exists(ARCHIVO_CHEQUES):
+        print("⚠️ No hay registro de cheques aún.")
         return
+
+    num_anular = pedir_numero_cheque("Ingresa el número de cheque que deseas anular: ")
+    try:
+        resultado = anular_cheque_numero(num_anular)
+    except ErrorOperacion as e:
+        print(e)
+        return
+    print(resultado["mensaje"])
+
+
+def obtener_conciliacion():
+    if not os.path.exists(ARCHIVO_CHEQUES) or not os.path.exists(ARCHIVO_BANCO):
+        raise ErrorOperacion("⚠️ Faltan archivos. Asegúrate de tener registros y estado de cuenta.")
 
     try:
         df_nuestro = cargar_cheques_registrados()
@@ -378,15 +455,14 @@ def conciliar_cuentas():
         col_monto = columnas_banco.get("monto")
 
         if not col_num or not col_monto:
-            print("⚠️ El archivo del banco debe incluir las columnas 'Num_cheque' y 'Monto'.")
-            return
+            raise ErrorOperacion("⚠️ El archivo del banco debe incluir las columnas 'Num_cheque' y 'Monto'.")
 
         df_banco = df_banco.copy()
         df_banco["Num_norm"] = df_banco[col_num].map(normalizar_numero_cheque)
         df_banco["Monto_valor"] = df_banco[col_monto].map(convertir_monto)
         df_banco = df_banco[df_banco["Num_norm"].notna()].copy()
 
-        print("\n--- Resultados de Cheques Emitidos ---")
+        cheques = []
         for _, fila in df_nuestro.iterrows():
             num = fila["Num_norm"]
             if not num:
@@ -397,42 +473,82 @@ def conciliar_cuentas():
 
             if estado == "ANULADO":
                 if cobrado.empty:
-                    print(f"🚫 Cheque {num} está ANULADO y no aparece cobrado en el banco.")
+                    mensaje = f"🚫 Cheque {num} está ANULADO y no aparece cobrado en el banco."
+                    resultado = "ANULADO"
                 else:
-                    print(f"🚨 Cheque {num} está ANULADO pero el banco sí lo cobró.")
+                    mensaje = f"🚨 Cheque {num} está ANULADO pero el banco sí lo cobró."
+                    resultado = "ALERTA"
+                cheques.append({"num": num, "estado": estado, "resultado": resultado, "mensaje": mensaje})
                 continue
 
             if cobrado.empty:
-                print(f"⏳ Cheque {num} en TRÁNSITO.")
+                mensaje = f"⏳ Cheque {num} en TRÁNSITO."
+                cheques.append({"num": num, "estado": estado, "resultado": "TRANSITO", "mensaje": mensaje})
                 continue
 
             monto_nuestro = fila["Monto_valor"]
             monto_banco = cobrado.iloc[0]["Monto_valor"]
 
             if monto_nuestro is None or monto_banco is None:
-                print(f"⚠️ No pude comparar el monto del cheque {num} por datos inválidos.")
+                mensaje = f"⚠️ No pude comparar el monto del cheque {num} por datos inválidos."
+                resultado = "INVALIDO"
             elif monto_nuestro == monto_banco:
-                print(f"✅ Cheque {num} cobrado perfectamente.")
+                mensaje = f"✅ Cheque {num} cobrado perfectamente."
+                resultado = "COBRADO"
             else:
-                print(
+                mensaje = (
                     f"⚠️ ¡Ojo! Cheque {num} diferencia: Nuestro Q {formatear_monto(monto_nuestro)} | "
                     f"Banco Q {formatear_monto(monto_banco)}"
                 )
+                resultado = "DIFERENCIA"
+            cheques.append(
+                {
+                    "num": num,
+                    "estado": estado,
+                    "resultado": resultado,
+                    "monto_nuestro": monto_nuestro,
+                    "monto_banco": monto_banco,
+                    "mensaje": mensaje,
+                }
+            )
 
-        print("\n--- Cargos del Banco No Registrados por Nosotros ---")
+        no_registrados = []
         lista_nuestros_nums = set(df_nuestro["Num_norm"].dropna().tolist())
         for _, fila_banco in df_banco.iterrows():
             num_bco = fila_banco["Num_norm"]
             if num_bco not in lista_nuestros_nums:
                 monto_banco = fila_banco["Monto_valor"]
                 monto_texto = formatear_monto(monto_banco) if monto_banco is not None else "N/D"
-                print(
+                mensaje = (
                     f"❓ Cheque {num_bco} por Q {monto_texto} cobrado por el banco, "
                     "pero NO está en nuestro sistema."
                 )
+                no_registrados.append({"num": num_bco, "monto": monto_banco, "mensaje": mensaje})
 
+        return {"cheques": cheques, "no_registrados": no_registrados}
+
+    except ErrorOperacion:
+        raise
     except Exception as e:
-        print(f"⚠️ Ocurrió un error leyendo los archivos: {e}")
+        raise ErrorOperacion(f"⚠️ Ocurrió un error leyendo los archivos: {e}") from e
+
+
+def conciliar_cuentas():
+    print("\n--- CONCILIACIÓN BANCARIA ---")
+
+    try:
+        resultado = obtener_conciliacion()
+    except ErrorOperacion as e:
+        print(e)
+        return
+
+    print("\n--- Resultados de Cheques Emitidos ---")
+    for fila in resultado["cheques"]:
+        print(fila["mensaje"])
+
+    print("\n--- Cargos del Banco No Registrados por Nosotros ---")
+    for fila in resultado["no_registrados"]:
+        print(fila["mensaje"])
 
 
 def clear_ide_terminal():
@@ -440,12 +556,9 @@ def clear_ide_terminal():
     print("\n" * 45)
 
 
-def reporte_movimientos():
-    print("\n" + "=" * 40)
-    print(" 📊 CORTE DE CAJA MENSUAL 📊")
-    print("=" * 40)
-
-    periodo_actual = pd.Timestamp(datetime.now().date()).to_period("M")
+def obtener_reporte_movimientos(fecha=None):
+    fecha = fecha or datetime.now().date()
+    periodo_actual = pd.Timestamp(fecha).to_period("M")
     total_cheques = Decimal("0.00")
     total_depositos = Decimal("0.00")
 
@@ -459,11 +572,8 @@ def reporte_movimientos():
             (fila["Monto_valor"] for _, fila in df_cheques_mes.iterrows() if str(fila["Estado"]).upper() != "ANULADO"),
             Decimal("0.00"),
         )
-        print("\n--- CHEQUES EMITIDOS DEL MES ---")
-        print(df_cheques_mes[["Num", "Fecha", "Nombre", "Monto", "Estado"]].to_string(index=False))
     else:
-        print("\n--- CHEQUES EMITIDOS DEL MES ---")
-        print("No hay cheques registrados en el mes actual.")
+        df_cheques_mes = pd.DataFrame(columns=["Num", "Fecha", "Nombre", "Monto", "Estado"])
 
     df_depositos = cargar_depositos_registrados()
     df_depositos = df_depositos[df_depositos["Monto_valor"].notna() & df_depositos["Fecha_dt"].notna()].copy()
@@ -475,19 +585,50 @@ def reporte_movimientos():
             (fila["Monto_valor"] for _, fila in df_depositos_mes.iterrows()),
             Decimal("0.00"),
         )
+    else:
+        df_depositos_mes = pd.DataFrame(columns=["Fecha", "Descripcion", "Monto"])
+
+    saldo = total_depositos - total_cheques
+
+    return {
+        "periodo": str(periodo_actual),
+        "cheques": df_cheques_mes,
+        "depositos": df_depositos_mes,
+        "total_cheques": total_cheques,
+        "total_depositos": total_depositos,
+        "saldo": saldo,
+    }
+
+
+def reporte_movimientos():
+    print("\n" + "=" * 40)
+    print(" 📊 CORTE DE CAJA MENSUAL 📊")
+    print("=" * 40)
+
+    reporte = obtener_reporte_movimientos()
+    df_cheques_mes = reporte["cheques"]
+
+    if not df_cheques_mes.empty:
+        print("\n--- CHEQUES EMITIDOS DEL MES ---")
+        print(df_cheques_mes[["Num", "Fecha", "Nombre", "Monto", "Estado"]].to_string(index=False))
+    else:
+        print("\n--- CHEQUES EMITIDOS DEL MES ---")
+        print("No hay cheques registrados en el mes actual.")
+
+    df_depositos_mes = reporte["depositos"]
+
+    if not df_depositos_mes.empty:
         print("\n--- DEPÓSITOS RECIBIDOS DEL MES ---")
         print(df_depositos_mes[["Fecha", "Descripcion", "Monto"]].to_string(index=False))
     else:
         print("\n--- DEPÓSITOS RECIBIDOS DEL MES ---")
         print("No hay depósitos registrados en el mes actual.")
 
-    saldo = total_depositos - total_cheques
-
     print("\n" + "-" * 40)
-    print(f"📈 TOTAL INGRESOS (Depósitos): Q {formatear_monto(total_depositos)}")
-    print(f"📉 TOTAL EGRESOS (Cheques):  Q {formatear_monto(total_cheques)}")
+    print(f"📈 TOTAL INGRESOS (Depósitos): Q {formatear_monto(reporte['total_depositos'])}")
+    print(f"📉 TOTAL EGRESOS (Cheques):  Q {formatear_monto(reporte['total_cheques'])}")
     print("-" * 40)
-    print(f"💵 SALDO EN BÓVEDA:          Q {formatear_monto(saldo)}")
+    print(f"💵 SALDO EN BÓVEDA:          Q {formatear_monto(reporte['saldo'])}")
     print("-" * 40)
 
     input("\nPresiona ENTER para volver al menú...")
