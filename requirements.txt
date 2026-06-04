@@ -1,2 +1,4 @@
 pandas
 openpyxl
+num2words
+reportlab
