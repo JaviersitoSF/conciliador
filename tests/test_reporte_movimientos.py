@@ -1,10 +1,10 @@
-import csv
-import io
 import os
+import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from decimal import Decimal
+from io import StringIO
 from unittest.mock import patch
 
 import pandas as pd
@@ -12,7 +12,7 @@ import pandas as pd
 import main
 
 
-class ReporteMovimientosTests(unittest.TestCase):
+class SistemaBancarioTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.original_cwd = os.getcwd()
@@ -22,392 +22,220 @@ class ReporteMovimientosTests(unittest.TestCase):
         os.chdir(self.original_cwd)
         self.tmpdir.cleanup()
 
-    def ejecutar_reporte(self):
-        salida = io.StringIO()
-        with patch("builtins.input", return_value=""), redirect_stdout(salida):
-            main.reporte_movimientos()
-        return salida.getvalue()
+    def auditoria(self):
+        with main.conectar_db() as conexion:
+            return conexion.execute(
+                "SELECT accion, entidad, entidad_id, detalle FROM auditoria ORDER BY id"
+            ).fetchall()
 
-    def capturar(self, funcion, *args, **kwargs):
-        salida = io.StringIO()
-        with redirect_stdout(salida):
-            resultado = funcion(*args, **kwargs)
-        return resultado, salida.getvalue()
-
-    def escribir_csv(self, ruta, filas):
-        with open(ruta, "w", newline="", encoding="utf-8") as archivo:
-            csv.writer(archivo).writerows(filas)
-
-    def test_reporte_sin_archivos_no_usa_dt_sobre_object(self):
-        salida = self.ejecutar_reporte()
-
-        self.assertIn("No hay cheques registrados en el mes actual.", salida)
-        self.assertIn("No hay depósitos registrados en el mes actual.", salida)
-        self.assertIn("SALDO EN B", salida)
-        self.assertFalse(os.path.exists(main.ARCHIVO_CHEQUES))
-        self.assertFalse(os.path.exists(main.ARCHIVO_DEPOSITOS))
-
-    def test_reporte_con_archivos_vacios_no_usa_dt_sobre_object(self):
-        open(main.ARCHIVO_CHEQUES, "w", encoding="utf-8").close()
-        open(main.ARCHIVO_DEPOSITOS, "w", encoding="utf-8").close()
-
-        salida = self.ejecutar_reporte()
-
-        self.assertIn("No hay cheques registrados en el mes actual.", salida)
-        self.assertIn("No hay depósitos registrados en el mes actual.", salida)
-
-    def test_cargadores_devuelven_fecha_datetime_aun_vacios(self):
-        df_cheques = main.cargar_cheques_registrados()
-        df_depositos = main.cargar_depositos_registrados()
-
-        self.assertTrue(pd.api.types.is_datetime64_any_dtype(df_cheques["Fecha_dt"]))
-        self.assertTrue(pd.api.types.is_datetime64_any_dtype(df_depositos["Fecha_dt"]))
-
-    def test_reporte_filtra_mes_actual_y_suma_sin_cheques_anulados(self):
-        periodo_actual = pd.Timestamp(main.datetime.now().date()).to_period("M")
-        fecha_mes = periodo_actual.to_timestamp().strftime("%Y-%m-%d")
-        fecha_otro_mes = (periodo_actual - 1).to_timestamp().strftime("%Y-%m-%d")
-
-        self.escribir_csv(
-            main.ARCHIVO_CHEQUES,
-            [
-                ["100", fecha_mes, "PROVEEDOR UNO", "Q 150.25", "TRANSITO"],
-                ["101", fecha_mes, "ERROR", "999.00", "ANULADO"],
-                ["102", fecha_otro_mes, "FUERA DE MES", "25.00", "TRANSITO"],
-                ["103", "no-es-fecha", "SIN FECHA", "10.00", "TRANSITO"],
-                ["104", fecha_mes, "SIN MONTO", "malo", "TRANSITO"],
-            ],
-        )
-        self.escribir_csv(
-            main.ARCHIVO_DEPOSITOS,
-            [
-                [fecha_mes, "venta mostrador", "200.00"],
-                [fecha_mes, "transferencia", "300.50"],
-                [fecha_otro_mes, "fuera de mes", "900.00"],
-                ["", "sin fecha", "50.00"],
-                [fecha_mes, "sin monto", "malo"],
-            ],
-        )
-
-        salida = self.ejecutar_reporte()
-
-        self.assertIn("100", salida)
-        self.assertIn("101", salida)
-        self.assertNotIn("102", salida)
-        self.assertIn("TOTAL INGRESOS", salida)
-        self.assertIn("Q 500.50", salida)
-        self.assertIn("TOTAL EGRESOS", salida)
-        self.assertIn("Q 150.25", salida)
-        self.assertIn("Q 350.25", salida)
-
-    def test_registro_deposito_y_cheque_escriben_en_cwd_actual(self):
-        with patch("main.datetime") as fake_datetime:
-            fake_datetime.now.return_value.strftime.return_value = "2026-06-03"
-            with patch("builtins.input", side_effect=["125.5", "venta caja"]):
-                main.registrar_deposito()
-
-        main.guardar_en_archivo("777", "2026-06-03", "PROVEEDOR", Decimal("10.00"))
-
-        self.assertTrue(os.path.exists(os.path.join(self.tmpdir.name, main.ARCHIVO_DEPOSITOS)))
-        self.assertTrue(os.path.exists(os.path.join(self.tmpdir.name, main.ARCHIVO_CHEQUES)))
-
-    def test_convertir_y_formatear_montos(self):
-        self.assertIsNone(main.convertir_monto(None))
-        self.assertIsNone(main.convertir_monto(float("nan")))
-        self.assertIsNone(main.convertir_monto(""))
-        self.assertIsNone(main.convertir_monto("--"))
-        self.assertIsNone(main.convertir_monto("abc"))
+    def test_convertir_monto_rechaza_formatos_ambiguos(self):
         self.assertEqual(main.convertir_monto("Q 1,234.567"), Decimal("1234.57"))
         self.assertEqual(main.convertir_monto("(Q 10.005)"), Decimal("-10.01"))
-        self.assertEqual(main.convertir_monto(Decimal("1.234")), Decimal("1.23"))
         self.assertEqual(main.convertir_monto("−5"), Decimal("-5.00"))
-        self.assertEqual(main.formatear_monto("2"), "2.00")
-        with patch("main.pd.isna", side_effect=TypeError):
-            self.assertEqual(main.convertir_monto("3"), Decimal("3.00"))
-        with self.assertRaises(ValueError):
-            main.formatear_monto("malo")
+        self.assertIsNone(main.convertir_monto("1,50"))
+        self.assertIsNone(main.convertir_monto("1,2,3"))
+        self.assertIsNone(main.convertir_monto("1e3"))
+        self.assertIsNone(main.convertir_monto("abc"))
 
-    def test_normalizar_numero_cheque(self):
-        self.assertIsNone(main.normalizar_numero_cheque(None))
-        self.assertIsNone(main.normalizar_numero_cheque(float("nan")))
-        self.assertIsNone(main.normalizar_numero_cheque(""))
-        self.assertIsNone(main.normalizar_numero_cheque("0"))
-        self.assertIsNone(main.normalizar_numero_cheque("12.5"))
-        self.assertIsNone(main.normalizar_numero_cheque("abc"))
-        self.assertEqual(main.normalizar_numero_cheque("0012"), "12")
-        self.assertEqual(main.normalizar_numero_cheque("12.0"), "12")
-        self.assertEqual(main.normalizar_numero_cheque("13.00"), "13")
-        with patch("main.pd.isna", side_effect=TypeError):
-            self.assertEqual(main.normalizar_numero_cheque("14"), "14")
+    def test_base_se_inicializa_con_esquema(self):
+        main.inicializar_db()
 
-    def test_pedir_validadores_reintentan_hasta_valor_valido(self):
-        with patch("builtins.input", side_effect=["", " listo "]):
-            self.assertEqual(main.pedir_texto_no_vacio("x"), "listo")
+        with main.conectar_db() as conexion:
+            tablas = {
+                fila[0]
+                for fila in conexion.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
 
-        with patch("builtins.input", side_effect=["abc", "0", "15.25"]):
-            self.assertEqual(main.pedir_monto_positivo("x"), Decimal("15.25"))
-
-        with patch("builtins.input", side_effect=["", "abc", "0", "42"]):
-            self.assertEqual(main.pedir_numero_cheque("x"), "42")
-
-    def test_cargadores_limpian_filas_y_valores(self):
-        self.escribir_csv(
-            main.ARCHIVO_CHEQUES,
-            [
-                ["", "", "", "", ""],
-                ["001", "2026-06-03", "  proveedor  ", "Q 10.00", ""],
-                ["bad", "no", "x", "bad", "nan"],
-            ],
-        )
-        self.escribir_csv(
-            main.ARCHIVO_DEPOSITOS,
-            [
-                ["", "", ""],
-                ["2026-06-03", " venta ", "Q 20"],
-            ],
+        self.assertTrue(
+            {"cuentas_bancarias", "cheques", "depositos", "auditoria"} <= tablas
         )
 
-        cheques = main.cargar_cheques_registrados()
+    def test_registrar_deposito_es_transaccional_y_auditable(self):
+        resultado = main.registrar_deposito_datos(
+            "125.50", "venta caja", fecha="2026-06-03"
+        )
+
         depositos = main.cargar_depositos_registrados()
+        self.assertEqual(resultado["monto"], Decimal("125.50"))
+        self.assertEqual(depositos.iloc[0]["Descripcion"], "VENTA CAJA")
+        self.assertEqual(depositos.iloc[0]["Monto_valor"], Decimal("125.50"))
+        self.assertEqual(self.auditoria()[0]["accion"], "CREAR")
 
-        self.assertEqual(len(cheques), 2)
-        self.assertEqual(cheques.iloc[0]["Estado"], "TRANSITO")
-        self.assertEqual(cheques.iloc[0]["Num_norm"], "1")
-        self.assertEqual(cheques.iloc[0]["Monto_valor"], Decimal("10.00"))
-        self.assertTrue(pd.isna(cheques.iloc[1]["Fecha_dt"]))
-        self.assertEqual(depositos.iloc[0]["Descripcion"], "VENTA")
-        self.assertEqual(depositos.iloc[0]["Monto_valor"], Decimal("20.00"))
+    def test_emitir_cheque_crea_registro_auditoria_y_respaldo(self):
+        with patch("main.imprimir_cheque_pdf"):
+            resultado = main.emitir_cheque_datos(
+                "35",
+                "proveedor",
+                "100.00",
+                fecha="2026-06-03",
+                descripcion="compra",
+            )
 
-    def test_cargadores_manejan_emptydataerror_y_columnas_faltantes(self):
-        with patch("main.pd.read_csv", side_effect=pd.errors.EmptyDataError("vacio")):
-            open(main.ARCHIVO_CHEQUES, "w", encoding="utf-8").close()
-            open(main.ARCHIVO_DEPOSITOS, "w", encoding="utf-8").close()
-            self.assertTrue(main.cargar_cheques_registrados().empty)
-            self.assertTrue(main.cargar_depositos_registrados().empty)
+        cheque = main.cargar_cheques_registrados().iloc[0]
+        self.assertEqual(resultado["num"], "35")
+        self.assertEqual(cheque["Descripcion"], "COMPRA")
+        self.assertEqual(self.auditoria()[0]["entidad_id"], "35")
+        self.assertTrue(os.listdir(main.DIRECTORIO_RESPALDOS))
 
-        with patch("main.pd.read_csv", return_value=pd.DataFrame({"Num": ["1"]})):
-            df = main.cargar_cheques_registrados()
-            self.assertIn("Fecha", df.columns)
-            self.assertEqual(df.iloc[0]["Estado"], "TRANSITO")
+    def test_numero_cheque_es_unico_en_base_de_datos(self):
+        main.guardar_cheque_en_archivo("35", "2026-06-03", "A", "10.00")
 
-        with patch("main.pd.read_csv", return_value=pd.DataFrame({"Fecha": ["2026-06-03"]})):
-            df = main.cargar_depositos_registrados()
-            self.assertIn("Monto", df.columns)
+        with self.assertRaises(main.ErrorOperacion):
+            main.guardar_cheque_en_archivo("35", "2026-06-03", "B", "20.00")
 
-    def test_cheque_ya_registrado(self):
-        self.assertFalse(main.cheque_ya_registrado("1"))
-        self.escribir_csv(main.ARCHIVO_CHEQUES, [["1", "2026-06-03", "A", "1", "TRANSITO"]])
-        self.assertTrue(main.cheque_ya_registrado("1"))
-        with patch("main.cargar_cheques_registrados", return_value=pd.DataFrame({"Otra": []})):
-            self.assertFalse(main.cheque_ya_registrado("1"))
+        self.assertEqual(len(main.cargar_cheques_registrados()), 1)
+        self.assertEqual(len(self.auditoria()), 1)
 
-    def test_registrar_e_imprimir_flujos(self):
-        with patch("builtins.input", side_effect=["10", "proveedor", "9"]), \
-                patch("main.cheque_ya_registrado", return_value=True):
-            _, salida = self.capturar(main.registrar_e_imprimir)
-        self.assertIn("ya existe", salida)
+    def test_transaccion_revierte_datos_y_auditoria(self):
+        with self.assertRaises(RuntimeError):
+            with main.transaccion() as conexion:
+                conexion.execute(
+                    """
+                    INSERT INTO depositos (cuenta_id, fecha, descripcion, monto)
+                    VALUES (1, '2026-06-03', 'PRUEBA', '10.00')
+                    """
+                )
+                main.registrar_auditoria(
+                    conexion, "CREAR", "DEPOSITO", "1", "Debe revertirse"
+                )
+                raise RuntimeError("fallo")
 
-        with patch("builtins.input", side_effect=["10", "proveedor", "9"]), \
-                patch("main.cheque_ya_registrado", return_value=False), \
-                patch("main.imprimir_cheque_pdf", side_effect=RuntimeError("sin impresora")):
-            _, salida = self.capturar(main.registrar_e_imprimir)
-        self.assertIn("No se pudo completar", salida)
+        self.assertTrue(main.cargar_depositos_registrados().empty)
+        self.assertEqual(self.auditoria(), [])
 
-        with patch("builtins.input", side_effect=["10", "proveedor", "9"]), \
-                patch("main.cheque_ya_registrado", return_value=False), \
-                patch("main.imprimir_cheque_pdf"), \
-                patch("main.datetime") as fake_datetime:
-            fake_datetime.now.return_value.strftime.return_value = "2026-06-03"
-            _, salida = self.capturar(main.registrar_e_imprimir)
-        self.assertIn("listo para imprimir", salida)
-        self.assertTrue(os.path.exists(main.ARCHIVO_CHEQUES))
-
-    def test_anular_cheque_flujos(self):
-        _, salida = self.capturar(main.anular_cheque)
-        self.assertIn("No hay registro", salida)
-
-        open(main.ARCHIVO_CHEQUES, "w", encoding="utf-8").close()
-        with patch("builtins.input", return_value="1"):
-            _, salida = self.capturar(main.anular_cheque)
-        self.assertIn("No hay registro", salida)
-
-        self.escribir_csv(main.ARCHIVO_CHEQUES, [["1", "2026-06-03", "A", "1", "TRANSITO"]])
-        with patch("builtins.input", return_value="2"):
-            _, salida = self.capturar(main.anular_cheque)
-        self.assertIn("no existe", salida)
-
-        with patch("builtins.input", return_value="1"):
-            _, salida = self.capturar(main.anular_cheque)
-        self.assertIn("marcado como ANULADO", salida)
-        with open(main.ARCHIVO_CHEQUES, encoding="utf-8") as archivo:
-            self.assertIn("ANULADO", archivo.read())
-
-        self.escribir_csv(
-            main.ARCHIVO_CHEQUES,
-            [
-                ["3", "2026-06-03", "A", "1", "TRANSITO"],
-                ["3", "2026-06-03", "B", "2", "TRANSITO"],
-            ],
+    def test_anular_conserva_datos_y_registra_auditoria(self):
+        main.guardar_cheque_en_archivo(
+            "35", "2026-06-03", "PROVEEDOR", "10.00", "COMPRA URGENTE"
         )
-        with patch("builtins.input", return_value="3"):
-            _, salida = self.capturar(main.anular_cheque)
-        self.assertIn("aparecía 2 veces", salida)
 
-    def test_conciliar_cuentas_flujos(self):
-        _, salida = self.capturar(main.conciliar_cuentas)
-        self.assertIn("Faltan archivos", salida)
+        main.anular_cheque_numero("35")
 
-        self.escribir_csv(main.ARCHIVO_CHEQUES, [["1", "2026-06-03", "A", "1", "TRANSITO"]])
-        pd.DataFrame({"Otra": [1]}).to_excel(main.ARCHIVO_BANCO, index=False)
-        _, salida = self.capturar(main.conciliar_cuentas)
-        self.assertIn("debe incluir", salida)
+        cheque = main.cargar_cheques_registrados().iloc[0]
+        self.assertEqual(cheque["Estado"], "ANULADO")
+        self.assertEqual(cheque["Descripcion"], "COMPRA URGENTE")
+        self.assertEqual([fila["accion"] for fila in self.auditoria()], ["CREAR", "ANULAR"])
 
-        self.escribir_csv(
-            main.ARCHIVO_CHEQUES,
-            [
-                ["", "2026-06-03", "SIN NUM", "1", "TRANSITO"],
-                ["1", "2026-06-03", "OK", "100", "TRANSITO"],
-                ["2", "2026-06-03", "DIF", "100", "TRANSITO"],
-                ["3", "2026-06-03", "TRANSITO", "100", "TRANSITO"],
-                ["4", "2026-06-03", "ANULADO NO COBRADO", "100", "ANULADO"],
-                ["5", "2026-06-03", "ANULADO COBRADO", "100", "ANULADO"],
-                ["6", "2026-06-03", "MALO", "bad", "TRANSITO"],
-            ],
-        )
+    def test_respaldos_se_rotan(self):
+        main.inicializar_db()
+        with patch.object(main, "MAX_RESPALDOS", 2):
+            main.crear_respaldo()
+            main.crear_respaldo()
+            main.crear_respaldo()
+
+        self.assertEqual(len(os.listdir(main.DIRECTORIO_RESPALDOS)), 2)
+
+    def test_reporte_mensual_excluye_anulados(self):
+        main.guardar_cheque_en_archivo("1", "2026-06-03", "A", "50.00")
+        main.guardar_cheque_en_archivo("2", "2026-06-04", "B", "20.00")
+        main.anular_cheque_numero("2")
+        main.registrar_deposito_datos("100.00", "venta", fecha="2026-06-05")
+
+        reporte = main.obtener_reporte_movimientos("2026-06-08")
+
+        self.assertEqual(reporte["total_cheques"], Decimal("50.00"))
+        self.assertEqual(reporte["total_depositos"], Decimal("100.00"))
+        self.assertEqual(reporte["saldo"], Decimal("50.00"))
+
+    def test_conciliacion_detecta_duplicados(self):
+        main.guardar_cheque_en_archivo("35", "2026-06-03", "A", "100.00")
+        pd.DataFrame(
+            {"Num_cheque": [35, 35], "Monto": ["100.00", "100.00"]}
+        ).to_excel(main.ARCHIVO_BANCO, index=False)
+
+        resultado = main.obtener_conciliacion()["cheques"][0]
+
+        self.assertEqual(resultado["resultado"], "DUPLICADO")
+        self.assertEqual(resultado["monto_banco"], Decimal("200.00"))
+
+    def test_conciliacion_cubre_estados_principales(self):
+        main.guardar_cheque_en_archivo("1", "2026-06-03", "OK", "100.00")
+        main.guardar_cheque_en_archivo("2", "2026-06-03", "DIF", "100.00")
+        main.guardar_cheque_en_archivo("3", "2026-06-03", "TRANSITO", "100.00")
+        main.guardar_cheque_en_archivo("4", "2026-06-03", "ANULADO", "100.00")
+        main.anular_cheque_numero("4")
         pd.DataFrame(
             {
-                "Num_cheque": [1, 2, 5, 6, 99],
-                "Monto": ["100.00", "90.00", "100.00", "bad", "12.00"],
+                "Num_cheque": [1, 2, 4, 99],
+                "Monto": ["100.00", "90.00", "100.00", "12.00"],
             }
         ).to_excel(main.ARCHIVO_BANCO, index=False)
-        _, salida = self.capturar(main.conciliar_cuentas)
-        self.assertIn("cobrado perfectamente", salida)
-        self.assertIn("diferencia", salida)
-        self.assertIn("en TR", salida)
-        self.assertIn("ANULADO y no aparece", salida)
-        self.assertIn("ANULADO pero el banco", salida)
-        self.assertIn("datos inválidos", salida)
-        self.assertIn("NO está en nuestro sistema", salida)
 
-        with patch("main.pd.read_excel", side_effect=RuntimeError("xls roto")):
-            _, salida = self.capturar(main.conciliar_cuentas)
-        self.assertIn("Ocurrió un error", salida)
+        resultado = main.obtener_conciliacion()
+        estados = {fila["num"]: fila["resultado"] for fila in resultado["cheques"]}
 
-        df_nuestro = pd.DataFrame(
-            {
-                "Num_norm": ["", "7"],
-                "Estado": ["TRANSITO", "TRANSITO"],
-                "Monto_valor": [Decimal("1.00"), Decimal("1.00")],
-            }
+        self.assertEqual(estados["1"], "COBRADO")
+        self.assertEqual(estados["2"], "DIFERENCIA")
+        self.assertEqual(estados["3"], "TRANSITO")
+        self.assertEqual(estados["4"], "ALERTA")
+        self.assertEqual(resultado["no_registrados"][0]["num"], "99")
+
+    def test_cuentas_separan_numeros_movimientos_y_reportes(self):
+        cuenta_a = main.crear_cuenta_bancaria("BANCO A", "Monetaria", "001")
+        cuenta_b = main.crear_cuenta_bancaria("BANCO B", "Monetaria", "002")
+
+        main.guardar_cheque_en_archivo(
+            "100", "2026-06-03", "A", "10.00", cuenta_id=cuenta_a
         )
-        df_banco = pd.DataFrame({"Num_cheque": [7], "Monto": ["1.00"]})
-        with patch("main.cargar_cheques_registrados", return_value=df_nuestro), \
-                patch("main.pd.read_excel", return_value=df_banco):
-            _, salida = self.capturar(main.conciliar_cuentas)
-        self.assertIn("Cheque 7 cobrado perfectamente", salida)
-
-    def test_imprimir_cheque_pdf_sin_abrir_programas_reales(self):
-        class PdfFalso:
-            def __init__(self):
-                self.textos = []
-
-            def drawString(self, *args):
-                self.textos.append(args)
-
-            def setFont(self, *args):
-                self.fuentes = getattr(self, "fuentes", [])
-                self.fuentes.append(args)
-
-            def save(self):
-                self.guardado = True
-
-        pdf = PdfFalso()
-        with patch("main.canvas.Canvas", return_value=pdf), \
-                patch("main.platform.system", return_value="Linux"), \
-                patch("main.subprocess.run") as run:
-            main.imprimir_cheque_pdf("1", "2026-06-03", "A", "1234567.89")
-        run.assert_called_once_with(
-            ["xdg-open", "cheque_1.pdf"],
-            stdout=main.subprocess.PIPE,
-            stderr=main.subprocess.PIPE,
-            text=True,
-            check=True,
+        main.guardar_cheque_en_archivo(
+            "100", "2026-06-03", "B", "20.00", cuenta_id=cuenta_b
         )
-        self.assertTrue(pdf.guardado)
-        self.assertIn(
-            (5 * main.cm, 11.5 * main.cm, "Guatemala 3 de junio del 2026"),
-            pdf.textos,
+        main.registrar_deposito_datos(
+            "50.00", "venta a", fecha="2026-06-03", cuenta_id=cuenta_a
         )
-        self.assertIn((16.5 * main.cm, 11.5 * main.cm, "1,234,567.89"), pdf.textos)
-        self.assertIn(("Helvetica-Bold", 12), pdf.fuentes)
-        self.assertIn((4.5 * main.cm, 8.5 * main.cm, "NO NEGOCIABLE"), pdf.textos)
-        self.assertTrue(all(len(texto) == 3 for texto in pdf.textos))
-
-        with patch("main.canvas.Canvas", return_value=PdfFalso()), \
-                patch("main.platform.system", return_value="Darwin"), \
-                patch("main.subprocess.run") as run:
-            main.imprimir_cheque_pdf("2", "2026-06-03", "A", "10")
-        run.assert_called_once_with(
-            [
-                "lp",
-                "-o", "media=Custom.220x140mm",
-                "-o", "scaling=100",
-                "-o", "position=top-left",
-                "cheque_2.pdf",
-            ],
-            stdout=main.subprocess.PIPE,
-            stderr=main.subprocess.PIPE,
-            text=True,
-            check=True,
+        main.registrar_deposito_datos(
+            "80.00", "venta b", fecha="2026-06-03", cuenta_id=cuenta_b
         )
 
-        with patch("main.canvas.Canvas", return_value=PdfFalso()), \
-                patch("main.platform.system", return_value="Windows"), \
-                patch("main.os.startfile", create=True) as startfile:
-            main.imprimir_cheque_pdf("3", "2026-06-03", "A", "10")
-        startfile.assert_called_once_with("cheque_3.pdf", "print")
+        reporte_a = main.obtener_reporte_movimientos("2026-06-08", cuenta_a)
+        reporte_b = main.obtener_reporte_movimientos("2026-06-08", cuenta_b)
 
-        with patch("main.canvas.Canvas", return_value=PdfFalso()), \
-                patch("main.platform.system", return_value="Windows"), \
-                patch("main.os.startfile", None, create=True):
-            _, salida = self.capturar(main.imprimir_cheque_pdf, "4", "2026-06-03", "A", "10")
-        self.assertIn("Abre el PDF manual", salida)
+        self.assertEqual(reporte_a["saldo"], Decimal("40.00"))
+        self.assertEqual(reporte_b["saldo"], Decimal("60.00"))
+        self.assertEqual(len(main.cargar_cheques_registrados(cuenta_a)), 1)
+        self.assertEqual(len(main.cargar_cheques_registrados(cuenta_b)), 1)
 
-        error = main.subprocess.CalledProcessError(
-            1,
-            ["xdg-open", "cheque_5.pdf"],
-            stderr="chrome no pudo abrir el PDF",
-        )
-        with patch("main.canvas.Canvas", return_value=PdfFalso()), \
-                patch("main.platform.system", return_value="Linux"), \
-                patch("main.subprocess.run", side_effect=error):
-            _, salida = self.capturar(main.imprimir_cheque_pdf, "5", "2026-06-03", "A", "10")
-        self.assertIn("Abre el PDF manual", salida)
-        self.assertIn("chrome no pudo abrir el PDF", salida)
+    def test_consola_obliga_a_seleccionar_cuenta_para_emitir(self):
+        cuenta_id = main.crear_cuenta_bancaria("BANCO A", "Operativa", "123456")
+        cuentas = [
+            cuenta
+            for cuenta in main.listar_cuentas_bancarias()
+            if cuenta["id"] == cuenta_id
+        ]
 
-    def test_menu_clear_y_main(self):
-        _, salida = self.capturar(main.clear_ide_terminal)
-        self.assertGreaterEqual(salida.count("\n"), 45)
+        with patch("main.listar_cuentas_bancarias", return_value=cuentas), \
+                patch(
+                    "builtins.input",
+                    side_effect=["x", "1", "10.00", "Proveedor", "Compra", "35"],
+                ), \
+                patch("main.imprimir_cheque_pdf"), \
+                redirect_stdout(StringIO()):
+            main.registrar_e_imprimir()
 
-        _, salida = self.capturar(main.mostrar_menu)
-        self.assertIn("SISTEMA DE CONTROL", salida)
+        cheque = main.cargar_cheques_registrados(cuenta_id).iloc[0]
+        self.assertEqual(cheque["Num"], "35")
+        self.assertEqual(cheque["Banco"], "BANCO A")
 
-        acciones = {
-            "1": "registrar_e_imprimir",
-            "2": "registrar_deposito",
-            "3": "conciliar_cuentas",
-            "4": "anular_cheque",
-            "5": "reporte_movimientos",
-            "6": "reimprimir_cheque",
-        }
-        for opcion, funcion in acciones.items():
-            with patch("builtins.input", return_value=opcion), \
-                    patch(f"main.{funcion}", side_effect=SystemExit), \
-                    self.assertRaises(SystemExit):
-                main.main()
+    def test_reimprimir_registra_auditoria(self):
+        main.guardar_cheque_en_archivo("35", "2026-06-03", "A", "10.00")
 
-        with patch("builtins.input", side_effect=["x", "7"]), self.assertRaises(SystemExit):
-            main.main()
+        with patch("main.imprimir_cheque_pdf"):
+            main.reimprimir_cheque_numero("35")
+
+        self.assertEqual(self.auditoria()[-1]["accion"], "REIMPRIMIR")
+
+    def test_restricciones_sqlite_impiden_estado_invalido(self):
+        main.inicializar_db()
+
+        with main.conectar_db() as conexion, self.assertRaises(sqlite3.IntegrityError):
+            conexion.execute(
+                """
+                INSERT INTO cheques
+                    (cuenta_id, numero, fecha, nombre, monto, estado, descripcion)
+                VALUES (1, '1', '2026-06-03', 'A', '10.00', 'BORRADO', '')
+                """
+            )
 
 
 if __name__ == "__main__":

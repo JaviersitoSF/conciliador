@@ -1,10 +1,13 @@
-import csv
 import os
 import platform
+import re
+import sqlite3
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from pathlib import Path
 
 import pandas as pd
 from num2words import num2words
@@ -12,13 +15,219 @@ from reportlab.lib.units import cm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
-ARCHIVO_CHEQUES = "cheques_emitidos.csv"
+ARCHIVO_DATOS = "conciliador.db"
 ARCHIVO_BANCO = "estado_cuenta.xlsx"
-ARCHIVO_DEPOSITOS = "depositos.csv"
+DIRECTORIO_RESPALDOS = "respaldos"
+COLUMNAS_CHEQUES = [
+    "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Nombre", "Monto",
+    "Estado", "Descripcion",
+]
+PATRON_MONTO = re.compile(r"^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$")
+MAX_RESPALDOS = 10
 
 
 class ErrorOperacion(ValueError):
     """Error esperado en operaciones del sistema."""
+
+
+def conectar_db():
+    conexion = sqlite3.connect(ARCHIVO_DATOS, timeout=10)
+    conexion.row_factory = sqlite3.Row
+    conexion.execute("PRAGMA foreign_keys = ON")
+    conexion.execute("PRAGMA busy_timeout = 10000")
+    return conexion
+
+
+def inicializar_db():
+    with conectar_db() as conexion:
+        tabla_cheques = conexion.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'cheques'
+            """
+        ).fetchone()
+        if tabla_cheques:
+            columnas = {
+                fila["name"]
+                for fila in conexion.execute("PRAGMA table_info(cheques)").fetchall()
+            }
+            if "cuenta_id" not in columnas:
+                conexion.executescript(
+                    """
+                    DROP TABLE IF EXISTS cheques;
+                    DROP TABLE IF EXISTS depositos;
+                    DROP TABLE IF EXISTS auditoria;
+                    DROP TABLE IF EXISTS cuentas_bancarias;
+                    """
+                )
+
+        conexion.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS cheques (
+                id INTEGER PRIMARY KEY,
+                cuenta_id INTEGER NOT NULL,
+                numero TEXT NOT NULL,
+                fecha TEXT NOT NULL,
+                nombre TEXT NOT NULL,
+                monto TEXT NOT NULL,
+                estado TEXT NOT NULL DEFAULT 'TRANSITO'
+                    CHECK (estado IN ('TRANSITO', 'ANULADO')),
+                descripcion TEXT NOT NULL DEFAULT '',
+                creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (cuenta_id, numero),
+                FOREIGN KEY (cuenta_id) REFERENCES cuentas_bancarias(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS depositos (
+                id INTEGER PRIMARY KEY,
+                cuenta_id INTEGER NOT NULL,
+                fecha TEXT NOT NULL,
+                descripcion TEXT NOT NULL,
+                monto TEXT NOT NULL,
+                creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (cuenta_id) REFERENCES cuentas_bancarias(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS cuentas_bancarias (
+                id INTEGER PRIMARY KEY,
+                banco TEXT NOT NULL,
+                nombre TEXT NOT NULL,
+                numero TEXT NOT NULL DEFAULT '',
+                activa INTEGER NOT NULL DEFAULT 1 CHECK (activa IN (0, 1)),
+                creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (banco, nombre, numero)
+            );
+
+            CREATE TABLE IF NOT EXISTS auditoria (
+                id INTEGER PRIMARY KEY,
+                fecha_hora TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                accion TEXT NOT NULL,
+                entidad TEXT NOT NULL,
+                entidad_id TEXT,
+                detalle TEXT NOT NULL
+            );
+            """
+        )
+        conexion.execute(
+            """
+            INSERT OR IGNORE INTO cuentas_bancarias (id, banco, nombre, numero)
+            VALUES (1, 'SIN CONFIGURAR', 'Cuenta principal', '')
+            """
+        )
+
+
+def listar_cuentas_bancarias(solo_activas=True):
+    inicializar_db()
+    consulta = """
+        SELECT id, banco, nombre, numero, activa
+        FROM cuentas_bancarias
+    """
+    if solo_activas:
+        consulta += " WHERE activa = 1"
+    consulta += " ORDER BY banco, nombre"
+    with conectar_db() as conexion:
+        return [dict(fila) for fila in conexion.execute(consulta).fetchall()]
+
+
+def crear_cuenta_bancaria(banco, nombre, numero=""):
+    banco = str(banco or "").strip().upper()
+    nombre = str(nombre or "").strip()
+    numero = str(numero or "").strip()
+    if not banco or not nombre:
+        raise ErrorOperacion("⚠️ Banco y nombre de cuenta son obligatorios.")
+
+    try:
+        with transaccion() as conexion:
+            cursor = conexion.execute(
+                """
+                INSERT INTO cuentas_bancarias (banco, nombre, numero)
+                VALUES (?, ?, ?)
+                """,
+                (banco, nombre, numero),
+            )
+            cuenta_id = cursor.lastrowid
+            registrar_auditoria(
+                conexion,
+                "CREAR",
+                "CUENTA_BANCARIA",
+                cuenta_id,
+                f"{banco} - {nombre} - {numero or 'sin número'}",
+            )
+    except sqlite3.IntegrityError as e:
+        raise ErrorOperacion("⚠️ Esa cuenta bancaria ya está registrada.") from e
+    crear_respaldo()
+    return cuenta_id
+
+
+def obtener_cuenta(cuenta_id=None):
+    cuenta_id = 1 if cuenta_id is None else cuenta_id
+    try:
+        cuenta_id = int(cuenta_id)
+    except (TypeError, ValueError) as e:
+        raise ErrorOperacion("⚠️ Cuenta bancaria inválida.") from e
+
+    inicializar_db()
+    with conectar_db() as conexion:
+        cuenta = conexion.execute(
+            """
+            SELECT id, banco, nombre, numero, activa
+            FROM cuentas_bancarias
+            WHERE id = ? AND activa = 1
+            """,
+            (cuenta_id,),
+        ).fetchone()
+    if cuenta is None:
+        raise ErrorOperacion("⚠️ La cuenta bancaria no existe o está inactiva.")
+    return dict(cuenta)
+
+
+@contextmanager
+def transaccion():
+    inicializar_db()
+    conexion = conectar_db()
+    try:
+        conexion.execute("BEGIN IMMEDIATE")
+        yield conexion
+        conexion.commit()
+    except Exception:
+        conexion.rollback()
+        raise
+    finally:
+        conexion.close()
+
+
+def registrar_auditoria(conexion, accion, entidad, entidad_id, detalle):
+    conexion.execute(
+        """
+        INSERT INTO auditoria (accion, entidad, entidad_id, detalle)
+        VALUES (?, ?, ?, ?)
+        """,
+        (accion, entidad, str(entidad_id) if entidad_id is not None else None, detalle),
+    )
+
+
+def crear_respaldo():
+    if not os.path.exists(ARCHIVO_DATOS):
+        return None
+
+    directorio = Path(DIRECTORIO_RESPALDOS)
+    directorio.mkdir(exist_ok=True)
+    marca = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    destino = directorio / f"conciliador_{marca}.db"
+
+    origen = conectar_db()
+    copia = sqlite3.connect(destino)
+    try:
+        origen.backup(copia)
+    finally:
+        copia.close()
+        origen.close()
+
+    respaldos = sorted(directorio.glob("conciliador_*.db"), reverse=True)
+    for respaldo_antiguo in respaldos[MAX_RESPALDOS:]:
+        respaldo_antiguo.unlink()
+    return str(destino)
 
 
 def crear_dataframe_vacio(columnas):
@@ -47,7 +256,9 @@ def convertir_monto(valor):
 
     negativo = texto.startswith("(") and texto.endswith(")")
     if negativo:
-        texto = texto[1:-1]
+        texto = texto[1:-1].strip()
+        if texto.startswith(("+", "-", "−")):
+            return None
 
     texto = (
         texto.replace("Q", "")
@@ -55,15 +266,14 @@ def convertir_monto(valor):
         .replace("$", "")
         .replace("\xa0", "")
         .replace(" ", "")
-        .replace(",", "")
         .replace("−", "-")
     )
 
-    if texto in {"", "-", ".", "-.", "--"}:
+    if not PATRON_MONTO.fullmatch(texto):
         return None
 
     try:
-        monto = Decimal(texto)
+        monto = Decimal(texto.replace(",", ""))
     except InvalidOperation:
         return None
 
@@ -159,40 +369,68 @@ def pedir_numero_cheque(mensaje):
         return str(numero)
 
 
-def cargar_cheques_registrados():
-    columnas = ["Num", "Fecha", "Nombre", "Monto", "Estado", "Descripcion"]
+def etiqueta_cuenta(cuenta):
+    numero = cuenta["numero"]
+    referencia = f" terminada en {numero[-4:]}" if numero else ""
+    return f"{cuenta['banco']} - {cuenta['nombre']}{referencia}"
+
+
+def pedir_cuenta_bancaria():
+    cuentas = listar_cuentas_bancarias()
+    if not cuentas:
+        raise ErrorOperacion("⚠️ No hay cuentas bancarias registradas.")
+
+    print("\n--- SELECCIONAR CUENTA BANCARIA ---")
+    for posicion, cuenta in enumerate(cuentas, start=1):
+        print(f"{posicion}. {etiqueta_cuenta(cuenta)}")
+
+    while True:
+        opcion = input("Elige la cuenta bancaria: ").strip()
+        if opcion.isdigit() and 1 <= int(opcion) <= len(cuentas):
+            cuenta = cuentas[int(opcion) - 1]
+            print(f"Cuenta seleccionada: {etiqueta_cuenta(cuenta)}")
+            return cuenta
+        print("⚠️ Selecciona una cuenta de la lista.")
+
+
+def registrar_cuenta_bancaria():
+    print("\n--- REGISTRAR CUENTA BANCARIA ---")
+    banco = pedir_texto_no_vacio("Banco: ")
+    nombre = pedir_texto_no_vacio("Nombre interno de la cuenta: ")
+    numero = input("Número de cuenta (opcional): ").strip()
+    try:
+        cuenta_id = crear_cuenta_bancaria(banco, nombre, numero)
+    except ErrorOperacion as e:
+        print(e)
+        return
+    print(f"✅ Cuenta bancaria registrada con identificador {cuenta_id}.")
+
+
+def cargar_cheques_registrados(cuenta_id=None):
+    columnas = COLUMNAS_CHEQUES
     vacio = crear_dataframe_vacio(columnas)
     vacio["Num_norm"] = pd.Series(dtype=object)
 
-    if not os.path.exists(ARCHIVO_CHEQUES):
+    inicializar_db()
+    with conectar_db() as conexion:
+        consulta = """
+            SELECT c.cuenta_id AS Cuenta_id, cb.banco AS Banco,
+                   cb.nombre AS Cuenta, c.numero AS Num, c.fecha AS Fecha,
+                   c.nombre AS Nombre, c.monto AS Monto, c.estado AS Estado,
+                   c.descripcion AS Descripcion
+            FROM cheques c
+            JOIN cuentas_bancarias cb ON cb.id = c.cuenta_id
+        """
+        parametros = ()
+        if cuenta_id is not None:
+            consulta += " WHERE c.cuenta_id = ?"
+            parametros = (obtener_cuenta(cuenta_id)["id"],)
+        consulta += " ORDER BY c.id"
+        filas = conexion.execute(consulta, parametros).fetchall()
+    if not filas:
         return vacio
 
-    try:
-        df = pd.read_csv(
-            ARCHIVO_CHEQUES,
-            names=columnas,
-            header=None,
-            dtype=str,
-            keep_default_na=False,
-        )
-    except pd.errors.EmptyDataError:
-        return vacio
-
-    if df.empty:
-        return vacio
-
-    for columna in columnas:
-        if columna not in df.columns:
-            df[columna] = ""
-
-    df = df.fillna("")
-    df = df[df[columnas].apply(lambda fila: any(str(valor).strip() for valor in fila), axis=1)].copy()
-
-    for columna in columnas:
-        df[columna] = df[columna].astype(str).str.strip()
-
-    df["Estado"] = df["Estado"].str.upper()
-    df.loc[df["Estado"].isin(["", "NAN"]), "Estado"] = "TRANSITO"
+    df = pd.DataFrame([dict(fila) for fila in filas], columns=columnas)
     df["Num_norm"] = df["Num"].map(normalizar_numero_cheque)
     df["Monto_valor"] = df["Monto"].map(convertir_monto)
     df["Fecha_dt"] = pd.to_datetime(df["Fecha"], errors="coerce")
@@ -200,52 +438,48 @@ def cargar_cheques_registrados():
     return df
 
 
-def cargar_depositos_registrados():
-    columnas = ["Fecha", "Descripcion", "Monto"]
+def cargar_depositos_registrados(cuenta_id=None):
+    columnas = ["Cuenta_id", "Banco", "Cuenta", "Fecha", "Descripcion", "Monto"]
     vacio = crear_dataframe_vacio(columnas)
 
-    if not os.path.exists(ARCHIVO_DEPOSITOS):
+    inicializar_db()
+    with conectar_db() as conexion:
+        consulta = """
+            SELECT d.cuenta_id AS Cuenta_id, cb.banco AS Banco,
+                   cb.nombre AS Cuenta, d.fecha AS Fecha,
+                   d.descripcion AS Descripcion, d.monto AS Monto
+            FROM depositos d
+            JOIN cuentas_bancarias cb ON cb.id = d.cuenta_id
+        """
+        parametros = ()
+        if cuenta_id is not None:
+            consulta += " WHERE d.cuenta_id = ?"
+            parametros = (obtener_cuenta(cuenta_id)["id"],)
+        consulta += " ORDER BY d.id"
+        filas = conexion.execute(consulta, parametros).fetchall()
+    if not filas:
         return vacio
 
-    try:
-        df = pd.read_csv(
-            ARCHIVO_DEPOSITOS,
-            names=columnas,
-            header=None,
-            dtype=str,
-            keep_default_na=False,
-        )
-    except pd.errors.EmptyDataError:
-        return vacio
-
-    if df.empty:
-        return vacio
-
-    for columna in columnas:
-        if columna not in df.columns:
-            df[columna] = ""
-
-    df = df.fillna("")
-    df = df[df[columnas].apply(lambda fila: any(str(valor).strip() for valor in fila), axis=1)].copy()
-
-    for columna in columnas:
-        df[columna] = df[columna].astype(str).str.strip()
-
-    df["Descripcion"] = df["Descripcion"].str.upper()
+    df = pd.DataFrame([dict(fila) for fila in filas], columns=columnas)
     df["Monto_valor"] = df["Monto"].map(convertir_monto)
     df["Fecha_dt"] = pd.to_datetime(df["Fecha"], errors="coerce")
 
     return df
 
 
-def cheque_ya_registrado(numero):
-    df = cargar_cheques_registrados()
-    if df.empty or "Num_norm" not in df.columns:
-        return False
-    return df["Num_norm"].eq(numero).any()
+def cheque_ya_registrado(numero, cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    inicializar_db()
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            "SELECT 1 FROM cheques WHERE cuenta_id = ? AND numero = ?",
+            (cuenta["id"], numero),
+        ).fetchone()
+    return fila is not None
 
 
-def registrar_deposito_datos(monto, descripcion, fecha=None):
+def registrar_deposito_datos(monto, descripcion, fecha=None, cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
     monto = convertir_monto(monto)
     if monto is None:
         raise ErrorOperacion("⚠️ Error: Solo usar números y punto decimal.")
@@ -259,13 +493,28 @@ def registrar_deposito_datos(monto, descripcion, fecha=None):
     fecha = fecha or datetime.now().strftime("%Y-%m-%d")
     descripcion = descripcion.upper()
 
-    with open(ARCHIVO_DEPOSITOS, mode="a", newline="", encoding="utf-8") as f:
-        escritor = csv.writer(f)
-        escritor.writerow([fecha, descripcion, formatear_monto(monto)])
+    with transaccion() as conexion:
+        cursor = conexion.execute(
+            """
+            INSERT INTO depositos (cuenta_id, fecha, descripcion, monto)
+            VALUES (?, ?, ?, ?)
+            """,
+            (cuenta["id"], fecha, descripcion, formatear_monto(monto)),
+        )
+        registrar_auditoria(
+            conexion,
+            "CREAR",
+            "DEPOSITO",
+            cursor.lastrowid,
+            f"{cuenta['banco']} / {cuenta['nombre']}: depósito "
+            f"Q {formatear_monto(monto)}: {descripcion}",
+        )
+    crear_respaldo()
 
     return {
         "fecha": fecha,
         "descripcion": descripcion,
+        "cuenta_id": cuenta["id"],
         "monto": monto,
         "mensaje": f"✅ Depósito de Q {formatear_monto(monto)} registrado con éxito.",
     }
@@ -273,9 +522,16 @@ def registrar_deposito_datos(monto, descripcion, fecha=None):
 
 def registrar_deposito():
     print("\n--- REGISTRO DE DEPÓSITO ---")
+    try:
+        cuenta = pedir_cuenta_bancaria()
+    except ErrorOperacion as e:
+        print(e)
+        return
     monto = pedir_monto_positivo("Monto del depósito (ej. 5000.00): ")
     descripcion = pedir_texto_no_vacio("Descripción (ej. Venta mostrador, Eukanuba): ").upper()
-    resultado = registrar_deposito_datos(monto, descripcion)
+    resultado = registrar_deposito_datos(
+        monto, descripcion, cuenta_id=cuenta["id"]
+    )
     print(resultado["mensaje"])
 
 
@@ -364,20 +620,43 @@ def abrir_pdf_silenciosamente(comando):
         raise RuntimeError(f"el comando fallo con codigo {e.returncode}") from e
 
 
-def guardar_en_archivo(num, fecha, nombre, monto, descripcion=""):
-    with open(ARCHIVO_CHEQUES, mode="a", newline="", encoding="utf-8") as f:
-        escritor = csv.writer(f)
-        escritor.writerow([num, fecha, nombre, formatear_monto(monto), "TRANSITO", descripcion])
-    print("💾 Datos guardados en el historial (CSV).")
+def guardar_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_id=None):
+    guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion, cuenta_id)
+    print("💾 Datos guardados en el historial.")
 
 
-def guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion=""):
-    with open(ARCHIVO_CHEQUES, mode="a", newline="", encoding="utf-8") as f:
-        escritor = csv.writer(f)
-        escritor.writerow([num, fecha, nombre, formatear_monto(monto), "TRANSITO", descripcion])
+def guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    try:
+        with transaccion() as conexion:
+            conexion.execute(
+                """
+                INSERT INTO cheques
+                    (cuenta_id, numero, fecha, nombre, monto, estado, descripcion)
+                VALUES (?, ?, ?, ?, ?, 'TRANSITO', ?)
+                """,
+                (
+                    cuenta["id"], num, fecha, nombre,
+                    formatear_monto(monto), descripcion,
+                ),
+            )
+            registrar_auditoria(
+                conexion,
+                "CREAR",
+                "CHEQUE",
+                num,
+                f"{cuenta['banco']} / {cuenta['nombre']}: cheque "
+                f"Q {formatear_monto(monto)} para {nombre}",
+            )
+    except sqlite3.IntegrityError as e:
+        raise ErrorOperacion(f"⚠️ El cheque {num} ya existe en el historial.") from e
+    crear_respaldo()
 
 
-def emitir_cheque_datos(num_cheque, nombre, monto, fecha=None, descripcion=""):
+def emitir_cheque_datos(
+    num_cheque, nombre, monto, fecha=None, descripcion="", cuenta_id=None
+):
+    cuenta = obtener_cuenta(cuenta_id)
     num_cheque = normalizar_numero_cheque(num_cheque)
     if not num_cheque:
         raise ErrorOperacion("⚠️ Error: el número de cheque debe ser mayor que cero.")
@@ -392,21 +671,24 @@ def emitir_cheque_datos(num_cheque, nombre, monto, fecha=None, descripcion=""):
     if monto <= 0:
         raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
 
-    if cheque_ya_registrado(num_cheque):
+    if cheque_ya_registrado(num_cheque, cuenta["id"]):
         raise ErrorOperacion(f"⚠️ El cheque {num_cheque} ya existe en el historial.")
 
     fecha = fecha or datetime.now().strftime("%Y-%m-%d")
     nombre = nombre.upper()
     descripcion = str(descripcion or "").strip().upper()
 
+    guardar_cheque_en_archivo(
+        num_cheque, fecha, nombre, monto, descripcion, cuenta["id"]
+    )
     imprimir_cheque_pdf(num_cheque, fecha, nombre, monto, descripcion)
-    guardar_cheque_en_archivo(num_cheque, fecha, nombre, monto, descripcion)
 
     return {
         "num": num_cheque,
         "fecha": fecha,
         "nombre": nombre,
         "descripcion": descripcion,
+        "cuenta_id": cuenta["id"],
         "monto": monto,
         "pdf": f"cheque_{num_cheque}.pdf",
         "mensaje": "✅ Cheque registrado y listo para imprimir con éxito.",
@@ -416,13 +698,18 @@ def emitir_cheque_datos(num_cheque, nombre, monto, fecha=None, descripcion=""):
 def registrar_e_imprimir():
     print("\n--- EMISIÓN DE CHEQUE ---")
 
+    try:
+        cuenta = pedir_cuenta_bancaria()
+    except ErrorOperacion as e:
+        print(e)
+        return
     monto = pedir_monto_positivo("Monto del cheque (ej. 1500.50): ")
     nombre = pedir_texto_no_vacio("Páguese a la orden de: ").upper()
     descripcion = pedir_texto_no_vacio("Descripción del cheque: ").upper()
 
     while True:
         num_cheque = pedir_numero_cheque("Número de cheque: ")
-        if not cheque_ya_registrado(num_cheque):
+        if not cheque_ya_registrado(num_cheque, cuenta["id"]):
             break
 
         print(f"⚠️ El cheque {num_cheque} ya existe en el historial.")
@@ -431,8 +718,15 @@ def registrar_e_imprimir():
     fecha_actual = datetime.now().strftime("%Y-%m-%d")
 
     try:
+        guardar_en_archivo(
+            num_cheque,
+            fecha_actual,
+            nombre,
+            monto,
+            descripcion,
+            cuenta["id"],
+        )
         imprimir_cheque_pdf(num_cheque, fecha_actual, nombre, monto, descripcion)
-        guardar_en_archivo(num_cheque, fecha_actual, nombre, monto, descripcion)
     except Exception as e:
         print(f"⚠️ No se pudo completar la emisión del cheque: {e}")
         return
@@ -440,12 +734,13 @@ def registrar_e_imprimir():
     print("✅ Cheque registrado y listo para imprimir con éxito.")
 
 
-def reimprimir_cheque_numero(num_cheque):
+def reimprimir_cheque_numero(num_cheque, cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
     num_cheque = normalizar_numero_cheque(num_cheque)
     if not num_cheque:
         raise ErrorOperacion("⚠️ Error: el número de cheque debe ser mayor que cero.")
 
-    df = cargar_cheques_registrados()
+    df = cargar_cheques_registrados(cuenta["id"])
     if df.empty:
         raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
 
@@ -465,15 +760,28 @@ def reimprimir_cheque_numero(num_cheque):
         monto,
         cheque["Descripcion"],
     )
+    with transaccion() as conexion:
+        registrar_auditoria(
+            conexion,
+            "REIMPRIMIR",
+            "CHEQUE",
+            num_cheque,
+            "Se generó una nueva copia del cheque.",
+        )
     return f"✅ Cheque {num_cheque} listo para volver a imprimir."
 
 
 def reimprimir_cheque():
     print("\n--- REIMPRESIÓN DE CHEQUE ---")
+    try:
+        cuenta = pedir_cuenta_bancaria()
+    except ErrorOperacion as e:
+        print(e)
+        return
     num_cheque = pedir_numero_cheque("Número de cheque a reimprimir: ")
 
     try:
-        mensaje = reimprimir_cheque_numero(num_cheque)
+        mensaje = reimprimir_cheque_numero(num_cheque, cuenta["id"])
     except ErrorOperacion as e:
         print(e)
         return
@@ -481,62 +789,67 @@ def reimprimir_cheque():
     print(mensaje)
 
 
-def anular_cheque_numero(num_anular):
-    if not os.path.exists(ARCHIVO_CHEQUES):
-        raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
-
+def anular_cheque_numero(num_anular, cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
     num_anular = normalizar_numero_cheque(num_anular)
     if not num_anular:
         raise ErrorOperacion("⚠️ Error: el número de cheque debe ser mayor que cero.")
 
-    df = cargar_cheques_registrados()
+    with transaccion() as conexion:
+        cursor = conexion.execute(
+            """
+            UPDATE cheques
+            SET estado = 'ANULADO', actualizado_en = CURRENT_TIMESTAMP
+            WHERE cuenta_id = ? AND numero = ?
+            """,
+            (cuenta["id"], num_anular),
+        )
+        if cursor.rowcount == 0:
+            total = conexion.execute("SELECT COUNT(*) FROM cheques").fetchone()[0]
+            if total == 0:
+                raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
+            raise ErrorOperacion(f"⚠️ El cheque {num_anular} no existe en los registros.")
+        registrar_auditoria(
+            conexion,
+            "ANULAR",
+            "CHEQUE",
+            num_anular,
+            "Estado cambiado a ANULADO.",
+        )
+    crear_respaldo()
 
-    if df.empty:
-        raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
-
-    coincidencias = df["Num_norm"].eq(num_anular)
-    if not coincidencias.any():
-        raise ErrorOperacion(f"⚠️ El cheque {num_anular} no existe en los registros.")
-
-    df.loc[coincidencias, "Estado"] = "ANULADO"
-    df[["Num", "Fecha", "Nombre", "Monto", "Estado"]].to_csv(
-        ARCHIVO_CHEQUES,
-        index=False,
-        header=False,
-    )
-
-    cantidad = int(coincidencias.sum())
-    if cantidad > 1:
-        mensaje = f"⚠️ El número {num_anular} aparecía {cantidad} veces y quedó marcado como ANULADO."
-    else:
-        mensaje = f"🚫 ¡Hecho! El cheque {num_anular} ha sido marcado como ANULADO."
-
-    return {"num": num_anular, "cantidad": cantidad, "mensaje": mensaje}
+    mensaje = f"🚫 ¡Hecho! El cheque {num_anular} ha sido marcado como ANULADO."
+    return {"num": num_anular, "cantidad": 1, "mensaje": mensaje}
 
 
 def anular_cheque():
     print("\n--- ANULAR CHEQUE ---")
 
-    if not os.path.exists(ARCHIVO_CHEQUES):
-        print("⚠️ No hay registro de cheques aún.")
+    try:
+        cuenta = pedir_cuenta_bancaria()
+    except ErrorOperacion as e:
+        print(e)
         return
-
     num_anular = pedir_numero_cheque("Ingresa el número de cheque que deseas anular: ")
     try:
-        resultado = anular_cheque_numero(num_anular)
+        resultado = anular_cheque_numero(num_anular, cuenta["id"])
     except ErrorOperacion as e:
         print(e)
         return
     print(resultado["mensaje"])
 
 
-def obtener_conciliacion():
-    if not os.path.exists(ARCHIVO_CHEQUES) or not os.path.exists(ARCHIVO_BANCO):
+def obtener_conciliacion(cuenta_id=None, archivo_banco=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    archivo_banco = archivo_banco or ARCHIVO_BANCO
+    if not os.path.exists(archivo_banco):
         raise ErrorOperacion("⚠️ Faltan archivos. Asegúrate de tener registros y estado de cuenta.")
 
     try:
-        df_nuestro = cargar_cheques_registrados()
-        df_banco = pd.read_excel(ARCHIVO_BANCO)
+        df_nuestro = cargar_cheques_registrados(cuenta["id"])
+        if df_nuestro.empty:
+            raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
+        df_banco = pd.read_excel(archivo_banco)
 
         columnas_banco = {str(col).strip().lower(): col for col in df_banco.columns}
         col_num = columnas_banco.get("num_cheque")
@@ -575,6 +888,25 @@ def obtener_conciliacion():
                 continue
 
             monto_nuestro = fila["Monto_valor"]
+            if len(cobrado) > 1:
+                montos_validos = cobrado["Monto_valor"].dropna().tolist()
+                total_banco = sum(montos_validos, Decimal("0.00"))
+                mensaje = (
+                    f"🚨 Cheque {num} aparece {len(cobrado)} veces en el banco "
+                    f"por un total de Q {formatear_monto(total_banco)}."
+                )
+                cheques.append(
+                    {
+                        "num": num,
+                        "estado": estado,
+                        "resultado": "DUPLICADO",
+                        "monto_nuestro": monto_nuestro,
+                        "monto_banco": total_banco,
+                        "mensaje": mensaje,
+                    }
+                )
+                continue
+
             monto_banco = cobrado.iloc[0]["Monto_valor"]
 
             if monto_nuestro is None or monto_banco is None:
@@ -613,7 +945,11 @@ def obtener_conciliacion():
                 )
                 no_registrados.append({"num": num_bco, "monto": monto_banco, "mensaje": mensaje})
 
-        return {"cheques": cheques, "no_registrados": no_registrados}
+        return {
+            "cuenta": cuenta,
+            "cheques": cheques,
+            "no_registrados": no_registrados,
+        }
 
     except ErrorOperacion:
         raise
@@ -625,7 +961,8 @@ def conciliar_cuentas():
     print("\n--- CONCILIACIÓN BANCARIA ---")
 
     try:
-        resultado = obtener_conciliacion()
+        cuenta = pedir_cuenta_bancaria()
+        resultado = obtener_conciliacion(cuenta["id"])
     except ErrorOperacion as e:
         print(e)
         return
@@ -644,13 +981,14 @@ def clear_ide_terminal():
     print("\n" * 45)
 
 
-def obtener_reporte_movimientos(fecha=None):
+def obtener_reporte_movimientos(fecha=None, cuenta_id=None):
     fecha = fecha or datetime.now().date()
     periodo_actual = pd.Timestamp(fecha).to_period("M")
     total_cheques = Decimal("0.00")
     total_depositos = Decimal("0.00")
 
-    df_cheques = cargar_cheques_registrados()
+    cuenta = obtener_cuenta(cuenta_id) if cuenta_id is not None else None
+    df_cheques = cargar_cheques_registrados(cuenta_id)
     df_cheques = df_cheques[df_cheques["Monto_valor"].notna() & df_cheques["Fecha_dt"].notna()].copy()
     df_cheques_mes = df_cheques[df_cheques["Fecha_dt"].dt.to_period("M") == periodo_actual].copy()
 
@@ -663,7 +1001,7 @@ def obtener_reporte_movimientos(fecha=None):
     else:
         df_cheques_mes = pd.DataFrame(columns=["Num", "Fecha", "Nombre", "Monto", "Estado"])
 
-    df_depositos = cargar_depositos_registrados()
+    df_depositos = cargar_depositos_registrados(cuenta_id)
     df_depositos = df_depositos[df_depositos["Monto_valor"].notna() & df_depositos["Fecha_dt"].notna()].copy()
     df_depositos_mes = df_depositos[df_depositos["Fecha_dt"].dt.to_period("M") == periodo_actual].copy()
 
@@ -680,6 +1018,7 @@ def obtener_reporte_movimientos(fecha=None):
 
     return {
         "periodo": str(periodo_actual),
+        "cuenta": cuenta,
         "cheques": df_cheques_mes,
         "depositos": df_depositos_mes,
         "total_cheques": total_cheques,
@@ -693,7 +1032,12 @@ def reporte_movimientos():
     print(" 📊 CORTE DE CAJA MENSUAL 📊")
     print("=" * 40)
 
-    reporte = obtener_reporte_movimientos()
+    try:
+        cuenta = pedir_cuenta_bancaria()
+    except ErrorOperacion as e:
+        print(e)
+        return
+    reporte = obtener_reporte_movimientos(cuenta_id=cuenta["id"])
     df_cheques_mes = reporte["cheques"]
 
     if not df_cheques_mes.empty:
@@ -733,14 +1077,15 @@ def mostrar_menu():
     print("4. Anular un cheque con error")
     print("5. Ver corte de caja (Reporte)")
     print("6. Volver a imprimir un cheque")
-    print("7. Salir")
+    print("7. Registrar cuenta bancaria")
+    print("8. Salir")
     print("=" * 40)
 
 
 def main():
     while True:
         mostrar_menu()
-        opcion = input("Elige una opción (1-7): ").strip()
+        opcion = input("Elige una opción (1-8): ").strip()
 
         if opcion == "1":
             registrar_e_imprimir()
@@ -755,10 +1100,12 @@ def main():
         elif opcion == "6":
             reimprimir_cheque()
         elif opcion == "7":
+            registrar_cuenta_bancaria()
+        elif opcion == "8":
             print("\nCerrando la bóveda... ¡Buenas noches y éxito en los negocios, Javier!")
             sys.exit()
         else:
-            print("⚠️ Opción inválida. Intenta un número del 1 al 7.")
+            print("⚠️ Opción inválida. Intenta un número del 1 al 8.")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import main as core
 
@@ -34,6 +34,11 @@ class ConciliadorApp(tk.Tk):
         encabezado.pack(fill="x")
         ttk.Label(encabezado, text="Sistema de Control Bancario", style="Title.TLabel").pack(side="left")
         ttk.Button(encabezado, text="Actualizar", command=self.refrescar_todo).pack(side="right")
+        ttk.Button(encabezado, text="Nueva cuenta", command=self.crear_cuenta).pack(side="right", padx=8)
+        self.selector_cuenta = ttk.Combobox(encabezado, state="readonly", width=36)
+        self.selector_cuenta.pack(side="right", padx=8)
+        self.selector_cuenta.bind("<<ComboboxSelected>>", lambda _evento: self.refrescar_todo())
+        ttk.Label(encabezado, text="Cuenta:").pack(side="right")
 
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=18, pady=(0, 18))
@@ -112,7 +117,7 @@ class ConciliadorApp(tk.Tk):
     def _crear_conciliacion(self):
         acciones = ttk.Frame(self.tab_conciliacion)
         acciones.pack(fill="x", pady=(0, 12))
-        ttk.Button(acciones, text="Conciliar con estado_cuenta.xlsx", command=self.conciliar).pack(side="left")
+        ttk.Button(acciones, text="Seleccionar estado y conciliar", command=self.conciliar).pack(side="left")
 
         panel = ttk.Frame(self.tab_conciliacion)
         panel.pack(fill="both", expand=True)
@@ -156,6 +161,7 @@ class ConciliadorApp(tk.Tk):
                 self.cheque_num.get(),
                 self.cheque_nombre.get(),
                 self.cheque_monto.get(),
+                cuenta_id=self.cuenta_id_actual(),
             )
         except Exception as e:
             messagebox.showerror("No se pudo emitir", str(e))
@@ -168,7 +174,11 @@ class ConciliadorApp(tk.Tk):
 
     def registrar_deposito(self):
         try:
-            resultado = core.registrar_deposito_datos(self.deposito_monto.get(), self.deposito_desc.get())
+            resultado = core.registrar_deposito_datos(
+                self.deposito_monto.get(),
+                self.deposito_desc.get(),
+                cuenta_id=self.cuenta_id_actual(),
+            )
         except Exception as e:
             messagebox.showerror("No se pudo registrar", str(e))
             return
@@ -179,7 +189,9 @@ class ConciliadorApp(tk.Tk):
 
     def anular_cheque(self):
         try:
-            resultado = core.anular_cheque_numero(self.anular_num.get())
+            resultado = core.anular_cheque_numero(
+                self.anular_num.get(), self.cuenta_id_actual()
+            )
         except Exception as e:
             messagebox.showerror("No se pudo anular", str(e))
             return
@@ -190,8 +202,16 @@ class ConciliadorApp(tk.Tk):
     def conciliar(self):
         self._limpiar_tabla(self.tabla_conciliacion)
         self._limpiar_tabla(self.tabla_no_registrados)
+        archivo = filedialog.askopenfilename(
+            title="Seleccionar estado de cuenta",
+            filetypes=[("Archivos Excel", "*.xlsx *.xls")],
+        )
+        if not archivo:
+            return
         try:
-            resultado = core.obtener_conciliacion()
+            resultado = core.obtener_conciliacion(
+                self.cuenta_id_actual(), archivo
+            )
         except Exception as e:
             messagebox.showerror("Conciliación", str(e))
             return
@@ -202,12 +222,66 @@ class ConciliadorApp(tk.Tk):
             self.tabla_no_registrados.insert("", tk.END, values=(fila["num"], monto, fila["mensaje"]))
 
     def refrescar_todo(self):
+        self._cargar_selector_cuentas()
         self._cargar_cheques()
         self._cargar_reporte()
 
+    def _cargar_selector_cuentas(self):
+        cuenta_actual = self.cuenta_id_actual(requerida=False)
+        self.cuentas = core.listar_cuentas_bancarias()
+        valores = [
+            f"{cuenta['id']} | {cuenta['banco']} | {cuenta['nombre']}"
+            for cuenta in self.cuentas
+        ]
+        self.selector_cuenta["values"] = valores
+        if not valores:
+            self.selector_cuenta.set("")
+            return
+        indice = next(
+            (
+                posicion
+                for posicion, cuenta in enumerate(self.cuentas)
+                if cuenta["id"] == cuenta_actual
+            ),
+            0,
+        )
+        self.selector_cuenta.current(indice)
+
+    def cuenta_id_actual(self, requerida=True):
+        valor = self.selector_cuenta.get()
+        if valor:
+            return int(valor.split("|", 1)[0].strip())
+        if requerida:
+            raise core.ErrorOperacion("No hay una cuenta bancaria seleccionada.")
+        return None
+
+    def crear_cuenta(self):
+        banco = simpledialog.askstring("Nueva cuenta", "Nombre del banco:", parent=self)
+        if banco is None:
+            return
+        nombre = simpledialog.askstring(
+            "Nueva cuenta", "Nombre interno de la cuenta:", parent=self
+        )
+        if nombre is None:
+            return
+        numero = simpledialog.askstring(
+            "Nueva cuenta", "Número de cuenta (opcional):", parent=self
+        )
+        try:
+            cuenta_id = core.crear_cuenta_bancaria(banco, nombre, numero or "")
+        except Exception as e:
+            messagebox.showerror("No se pudo crear", str(e))
+            return
+        self._cargar_selector_cuentas()
+        for indice, cuenta in enumerate(self.cuentas):
+            if cuenta["id"] == cuenta_id:
+                self.selector_cuenta.current(indice)
+                break
+        self.refrescar_todo()
+
     def _cargar_cheques(self):
         self._limpiar_tabla(self.tabla_cheques)
-        df = core.cargar_cheques_registrados()
+        df = core.cargar_cheques_registrados(self.cuenta_id_actual())
         if df.empty:
             return
         for _, fila in df.tail(30).iloc[::-1].iterrows():
@@ -218,7 +292,9 @@ class ConciliadorApp(tk.Tk):
             )
 
     def _cargar_reporte(self):
-        reporte = core.obtener_reporte_movimientos()
+        reporte = core.obtener_reporte_movimientos(
+            cuenta_id=self.cuenta_id_actual()
+        )
         self.lbl_ingresos.configure(text=f"Ingresos: Q {core.formatear_monto(reporte['total_depositos'])}")
         self.lbl_egresos.configure(text=f"Egresos: Q {core.formatear_monto(reporte['total_cheques'])}")
         self.lbl_saldo.configure(text=f"Saldo: Q {core.formatear_monto(reporte['saldo'])}")

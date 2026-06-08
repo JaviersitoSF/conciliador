@@ -1,7 +1,6 @@
 from main import (
     ARCHIVO_BANCO,
-    ARCHIVO_CHEQUES,
-    ARCHIVO_DEPOSITOS,
+    ARCHIVO_DATOS,
     anular_cheque,
     clear_ide_terminal,
     conciliar_cuentas,
