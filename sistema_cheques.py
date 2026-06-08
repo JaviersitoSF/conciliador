@@ -11,6 +11,7 @@ from main import (
     mostrar_menu,
     registrar_deposito,
     registrar_e_imprimir,
+    reimprimir_cheque,
     reporte_movimientos,
 )
 

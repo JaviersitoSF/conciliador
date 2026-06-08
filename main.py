@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import pandas as pd
 from num2words import num2words
 from reportlab.lib.units import cm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 ARCHIVO_CHEQUES = "cheques_emitidos.csv"
@@ -77,6 +78,13 @@ def formatear_monto(valor):
     if monto is None:
         raise ValueError("Monto invalido")
     return f"{monto:.2f}"
+
+
+def formatear_monto_impresion(valor):
+    monto = convertir_monto(valor)
+    if monto is None:
+        raise ValueError("Monto invalido")
+    return f"{monto:,.2f}"
 
 
 def normalizar_numero_cheque(valor):
@@ -152,7 +160,7 @@ def pedir_numero_cheque(mensaje):
 
 
 def cargar_cheques_registrados():
-    columnas = ["Num", "Fecha", "Nombre", "Monto", "Estado"]
+    columnas = ["Num", "Fecha", "Nombre", "Monto", "Estado", "Descripcion"]
     vacio = crear_dataframe_vacio(columnas)
     vacio["Num_norm"] = pd.Series(dtype=object)
 
@@ -271,22 +279,48 @@ def registrar_deposito():
     print(resultado["mensaje"])
 
 
-def imprimir_cheque_pdf(num, fecha, nombre, monto):
-    ancho_papel = 21.5 * cm
-    alto_papel = 14.0 * cm
+def formatear_fecha_cheque(fecha):
+    texto = str(fecha).strip()
+    try:
+        fecha_dt = datetime.strptime(texto, "%Y-%m-%d")
+    except ValueError:
+        return texto
+    meses = (
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    )
+    return f"{fecha_dt.day} de {meses[fecha_dt.month - 1]} del {fecha_dt.year}"
+
+
+def imprimir_cheque_pdf(num, fecha, nombre, monto, descripcion=""):
+    alto_cheque = 14 * cm
+    ancho_cheque = 22 * cm
     nombre_pdf = f"cheque_{num}.pdf"
 
-    pdf = canvas.Canvas(nombre_pdf, pagesize=(ancho_papel, alto_papel))
+    pdf = canvas.Canvas(nombre_pdf, pagesize=(ancho_cheque, alto_cheque))
 
-    monto_formateado = formatear_monto(monto)
-    entero, centavos = monto_formateado.split(".")
+    monto_formateado = formatear_monto_impresion(monto)
+    entero, centavos = formatear_monto(monto).split(".")
     monto_en_letras = num2words(int(entero), lang="es").upper()
-    texto_oficial = f"La suma de: {monto_en_letras} QUETZALES CON {centavos}/100"
+    texto_oficial = f"{monto_en_letras} QUETZALES CON {centavos}/100"
 
-    pdf.drawString(15 * cm, 12 * cm, f"Fecha: {fecha}")
-    pdf.drawString(2 * cm, 11 * cm, f"Páguese a: {nombre}")
-    pdf.drawString(16 * cm, 11 * cm, f"Q {monto_formateado}")
-    pdf.drawString(2 * cm, 10 * cm, texto_oficial)
+    pdf.drawString(5 * cm, 11.5 * cm, f"Guatemala {formatear_fecha_cheque(fecha)}")
+    pdf.drawString(4.3 * cm, 10.8 * cm, nombre)
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(16.5 * cm, 11.5 * cm, monto_formateado)
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(4.5 * cm, 8.5 * cm, "NO NEGOCIABLE")
+
+    ancho_disponible = ancho_cheque - 4.3 * cm - 1 * cm
+    tamano_texto = min(
+        10,
+        ancho_disponible * 10 / stringWidth(texto_oficial, "Helvetica", 10),
+    )
+    pdf.setFont("Helvetica", max(7, tamano_texto))
+    pdf.drawString(4.3 * cm, 10 * cm, texto_oficial)
+    pdf.setFont("Helvetica", 10)
+    if descripcion:
+        pdf.drawString(4.5 * cm, alto_cheque - 9.6 * cm, descripcion)
 
     pdf.save()
 
@@ -300,7 +334,13 @@ def imprimir_cheque_pdf(num, fecha, nombre, monto):
             else:
                 raise AttributeError("os.startfile no esta disponible en este entorno")
         elif platform.system() == "Darwin":
-            abrir_pdf_silenciosamente(["open", nombre_pdf])
+            abrir_pdf_silenciosamente([
+                "lp",
+                "-o", "media=Custom.220x140mm",
+                "-o", "scaling=100",
+                "-o", "position=top-left",
+                nombre_pdf,
+            ])
         else:
             print("🐧 Abriendo en Chrome OS...")
             abrir_pdf_silenciosamente(["xdg-open", nombre_pdf])
@@ -324,20 +364,20 @@ def abrir_pdf_silenciosamente(comando):
         raise RuntimeError(f"el comando fallo con codigo {e.returncode}") from e
 
 
-def guardar_en_archivo(num, fecha, nombre, monto):
+def guardar_en_archivo(num, fecha, nombre, monto, descripcion=""):
     with open(ARCHIVO_CHEQUES, mode="a", newline="", encoding="utf-8") as f:
         escritor = csv.writer(f)
-        escritor.writerow([num, fecha, nombre, formatear_monto(monto), "TRANSITO"])
+        escritor.writerow([num, fecha, nombre, formatear_monto(monto), "TRANSITO", descripcion])
     print("💾 Datos guardados en el historial (CSV).")
 
 
-def guardar_cheque_en_archivo(num, fecha, nombre, monto):
+def guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion=""):
     with open(ARCHIVO_CHEQUES, mode="a", newline="", encoding="utf-8") as f:
         escritor = csv.writer(f)
-        escritor.writerow([num, fecha, nombre, formatear_monto(monto), "TRANSITO"])
+        escritor.writerow([num, fecha, nombre, formatear_monto(monto), "TRANSITO", descripcion])
 
 
-def emitir_cheque_datos(num_cheque, nombre, monto, fecha=None):
+def emitir_cheque_datos(num_cheque, nombre, monto, fecha=None, descripcion=""):
     num_cheque = normalizar_numero_cheque(num_cheque)
     if not num_cheque:
         raise ErrorOperacion("⚠️ Error: el número de cheque debe ser mayor que cero.")
@@ -357,14 +397,16 @@ def emitir_cheque_datos(num_cheque, nombre, monto, fecha=None):
 
     fecha = fecha or datetime.now().strftime("%Y-%m-%d")
     nombre = nombre.upper()
+    descripcion = str(descripcion or "").strip().upper()
 
-    imprimir_cheque_pdf(num_cheque, fecha, nombre, monto)
-    guardar_cheque_en_archivo(num_cheque, fecha, nombre, monto)
+    imprimir_cheque_pdf(num_cheque, fecha, nombre, monto, descripcion)
+    guardar_cheque_en_archivo(num_cheque, fecha, nombre, monto, descripcion)
 
     return {
         "num": num_cheque,
         "fecha": fecha,
         "nombre": nombre,
+        "descripcion": descripcion,
         "monto": monto,
         "pdf": f"cheque_{num_cheque}.pdf",
         "mensaje": "✅ Cheque registrado y listo para imprimir con éxito.",
@@ -376,21 +418,67 @@ def registrar_e_imprimir():
 
     monto = pedir_monto_positivo("Monto del cheque (ej. 1500.50): ")
     nombre = pedir_texto_no_vacio("Páguese a la orden de: ").upper()
-    num_cheque = pedir_numero_cheque("Número de cheque: ")
+    descripcion = pedir_texto_no_vacio("Descripción del cheque: ").upper()
+
+    while True:
+        num_cheque = pedir_numero_cheque("Número de cheque: ")
+        if not cheque_ya_registrado(num_cheque):
+            break
+
+        print(f"⚠️ El cheque {num_cheque} ya existe en el historial.")
+        input("\nPresiona ENTER para ingresar otro número de cheque...")
+
     fecha_actual = datetime.now().strftime("%Y-%m-%d")
 
-    if cheque_ya_registrado(num_cheque):
-        print(f"⚠️ El cheque {num_cheque} ya existe en el historial.")
-        return
-
     try:
-        imprimir_cheque_pdf(num_cheque, fecha_actual, nombre, monto)
-        guardar_en_archivo(num_cheque, fecha_actual, nombre, monto)
+        imprimir_cheque_pdf(num_cheque, fecha_actual, nombre, monto, descripcion)
+        guardar_en_archivo(num_cheque, fecha_actual, nombre, monto, descripcion)
     except Exception as e:
         print(f"⚠️ No se pudo completar la emisión del cheque: {e}")
         return
 
     print("✅ Cheque registrado y listo para imprimir con éxito.")
+
+
+def reimprimir_cheque_numero(num_cheque):
+    num_cheque = normalizar_numero_cheque(num_cheque)
+    if not num_cheque:
+        raise ErrorOperacion("⚠️ Error: el número de cheque debe ser mayor que cero.")
+
+    df = cargar_cheques_registrados()
+    if df.empty:
+        raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
+
+    coincidencias = df[df["Num_norm"].eq(num_cheque)]
+    if coincidencias.empty:
+        raise ErrorOperacion(f"⚠️ El cheque {num_cheque} no existe en los registros.")
+
+    cheque = coincidencias.iloc[-1]
+    monto = convertir_monto(cheque["Monto"])
+    if monto is None:
+        raise ErrorOperacion(f"⚠️ El cheque {num_cheque} tiene un monto inválido.")
+
+    imprimir_cheque_pdf(
+        num_cheque,
+        cheque["Fecha"],
+        cheque["Nombre"],
+        monto,
+        cheque["Descripcion"],
+    )
+    return f"✅ Cheque {num_cheque} listo para volver a imprimir."
+
+
+def reimprimir_cheque():
+    print("\n--- REIMPRESIÓN DE CHEQUE ---")
+    num_cheque = pedir_numero_cheque("Número de cheque a reimprimir: ")
+
+    try:
+        mensaje = reimprimir_cheque_numero(num_cheque)
+    except ErrorOperacion as e:
+        print(e)
+        return
+
+    print(mensaje)
 
 
 def anular_cheque_numero(num_anular):
@@ -635,6 +723,7 @@ def reporte_movimientos():
 
 
 def mostrar_menu():
+    print("\n"*45)
     print("\n" + "=" * 40)
     print(" 💼 SISTEMA DE CONTROL BANCARIO 💼")
     print("=" * 40)
@@ -643,14 +732,15 @@ def mostrar_menu():
     print("3. Conciliar banco")
     print("4. Anular un cheque con error")
     print("5. Ver corte de caja (Reporte)")
-    print("6. Salir")
+    print("6. Volver a imprimir un cheque")
+    print("7. Salir")
     print("=" * 40)
 
 
 def main():
     while True:
         mostrar_menu()
-        opcion = input("Elige una opción (1-6): ").strip()
+        opcion = input("Elige una opción (1-7): ").strip()
 
         if opcion == "1":
             registrar_e_imprimir()
@@ -663,10 +753,12 @@ def main():
         elif opcion == "5":
             reporte_movimientos()
         elif opcion == "6":
+            reimprimir_cheque()
+        elif opcion == "7":
             print("\nCerrando la bóveda... ¡Buenas noches y éxito en los negocios, Javier!")
             sys.exit()
         else:
-            print("⚠️ Opción inválida. Intenta un número del 1 al 6.")
+            print("⚠️ Opción inválida. Intenta un número del 1 al 7.")
 
 
 if __name__ == "__main__":  # pragma: no cover

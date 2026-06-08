@@ -314,6 +314,10 @@ class ReporteMovimientosTests(unittest.TestCase):
             def drawString(self, *args):
                 self.textos.append(args)
 
+            def setFont(self, *args):
+                self.fuentes = getattr(self, "fuentes", [])
+                self.fuentes.append(args)
+
             def save(self):
                 self.guardado = True
 
@@ -321,7 +325,7 @@ class ReporteMovimientosTests(unittest.TestCase):
         with patch("main.canvas.Canvas", return_value=pdf), \
                 patch("main.platform.system", return_value="Linux"), \
                 patch("main.subprocess.run") as run:
-            main.imprimir_cheque_pdf("1", "2026-06-03", "A", "10")
+            main.imprimir_cheque_pdf("1", "2026-06-03", "A", "1234567.89")
         run.assert_called_once_with(
             ["xdg-open", "cheque_1.pdf"],
             stdout=main.subprocess.PIPE,
@@ -330,13 +334,27 @@ class ReporteMovimientosTests(unittest.TestCase):
             check=True,
         )
         self.assertTrue(pdf.guardado)
+        self.assertIn(
+            (5 * main.cm, 11.5 * main.cm, "Guatemala 3 de junio del 2026"),
+            pdf.textos,
+        )
+        self.assertIn((16.5 * main.cm, 11.5 * main.cm, "1,234,567.89"), pdf.textos)
+        self.assertIn(("Helvetica-Bold", 12), pdf.fuentes)
+        self.assertIn((4.5 * main.cm, 8.5 * main.cm, "NO NEGOCIABLE"), pdf.textos)
+        self.assertTrue(all(len(texto) == 3 for texto in pdf.textos))
 
         with patch("main.canvas.Canvas", return_value=PdfFalso()), \
                 patch("main.platform.system", return_value="Darwin"), \
                 patch("main.subprocess.run") as run:
             main.imprimir_cheque_pdf("2", "2026-06-03", "A", "10")
         run.assert_called_once_with(
-            ["open", "cheque_2.pdf"],
+            [
+                "lp",
+                "-o", "media=Custom.220x140mm",
+                "-o", "scaling=100",
+                "-o", "position=top-left",
+                "cheque_2.pdf",
+            ],
             stdout=main.subprocess.PIPE,
             stderr=main.subprocess.PIPE,
             text=True,
@@ -380,6 +398,7 @@ class ReporteMovimientosTests(unittest.TestCase):
             "3": "conciliar_cuentas",
             "4": "anular_cheque",
             "5": "reporte_movimientos",
+            "6": "reimprimir_cheque",
         }
         for opcion, funcion in acciones.items():
             with patch("builtins.input", return_value=opcion), \
@@ -387,7 +406,7 @@ class ReporteMovimientosTests(unittest.TestCase):
                     self.assertRaises(SystemExit):
                 main.main()
 
-        with patch("builtins.input", side_effect=["x", "6"]), self.assertRaises(SystemExit):
+        with patch("builtins.input", side_effect=["x", "7"]), self.assertRaises(SystemExit):
             main.main()
 
 
