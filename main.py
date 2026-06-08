@@ -32,8 +32,22 @@ class ErrorOperacion(ValueError):
     """Error esperado en operaciones del sistema."""
 
 
+class ConexionSQLite(sqlite3.Connection):
+    """Conexión que también se cierra al terminar un bloque with."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def conectar_db():
-    conexion = sqlite3.connect(ARCHIVO_DATOS, timeout=10)
+    conexion = sqlite3.connect(
+        ARCHIVO_DATOS,
+        timeout=10,
+        factory=ConexionSQLite,
+    )
     conexion.row_factory = sqlite3.Row
     conexion.execute("PRAGMA foreign_keys = ON")
     conexion.execute("PRAGMA busy_timeout = 10000")

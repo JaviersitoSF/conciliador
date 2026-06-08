@@ -52,6 +52,13 @@ class SistemaBancarioTests(unittest.TestCase):
             {"cuentas_bancarias", "cheques", "depositos", "auditoria"} <= tablas
         )
 
+    def test_conexion_se_cierra_al_salir_del_contexto(self):
+        with main.conectar_db() as conexion:
+            conexion.execute("SELECT 1")
+
+        with self.assertRaises(sqlite3.ProgrammingError):
+            conexion.execute("SELECT 1")
+
     def test_registrar_deposito_es_transaccional_y_auditable(self):
         resultado = main.registrar_deposito_datos(
             "125.50", "venta caja", fecha="2026-06-03"
