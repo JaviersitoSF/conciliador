@@ -5,7 +5,7 @@ import sqlite3
 import subprocess
 import sys
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
@@ -23,6 +23,8 @@ COLUMNAS_CHEQUES = [
     "Estado", "Descripcion",
 ]
 PATRON_MONTO = re.compile(r"^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$")
+PATRON_NUMERO_CHEQUE = re.compile(r"^\d+(?:\.0+)?$")
+PATRON_FECHA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_RESPALDOS = 10
 
 
@@ -40,29 +42,18 @@ def conectar_db():
 
 def inicializar_db():
     with conectar_db() as conexion:
-        tabla_cheques = conexion.execute(
-            """
-            SELECT 1 FROM sqlite_master
-            WHERE type = 'table' AND name = 'cheques'
-            """
-        ).fetchone()
-        if tabla_cheques:
-            columnas = {
-                fila["name"]
-                for fila in conexion.execute("PRAGMA table_info(cheques)").fetchall()
-            }
-            if "cuenta_id" not in columnas:
-                conexion.executescript(
-                    """
-                    DROP TABLE IF EXISTS cheques;
-                    DROP TABLE IF EXISTS depositos;
-                    DROP TABLE IF EXISTS auditoria;
-                    DROP TABLE IF EXISTS cuentas_bancarias;
-                    """
-                )
-
         conexion.executescript(
             """
+            CREATE TABLE IF NOT EXISTS cuentas_bancarias (
+                id INTEGER PRIMARY KEY,
+                banco TEXT NOT NULL,
+                nombre TEXT NOT NULL,
+                numero TEXT NOT NULL DEFAULT '',
+                activa INTEGER NOT NULL DEFAULT 1 CHECK (activa IN (0, 1)),
+                creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (banco, nombre, numero)
+            );
+
             CREATE TABLE IF NOT EXISTS cheques (
                 id INTEGER PRIMARY KEY,
                 cuenta_id INTEGER NOT NULL,
@@ -87,16 +78,6 @@ def inicializar_db():
                 monto TEXT NOT NULL,
                 creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (cuenta_id) REFERENCES cuentas_bancarias(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS cuentas_bancarias (
-                id INTEGER PRIMARY KEY,
-                banco TEXT NOT NULL,
-                nombre TEXT NOT NULL,
-                numero TEXT NOT NULL DEFAULT '',
-                activa INTEGER NOT NULL DEFAULT 1 CHECK (activa IN (0, 1)),
-                creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (banco, nombre, numero)
             );
 
             CREATE TABLE IF NOT EXISTS auditoria (
@@ -156,7 +137,7 @@ def crear_cuenta_bancaria(banco, nombre, numero=""):
             )
     except sqlite3.IntegrityError as e:
         raise ErrorOperacion("⚠️ Esa cuenta bancaria ya está registrada.") from e
-    crear_respaldo()
+    crear_respaldo_posterior()
     return cuenta_id
 
 
@@ -228,6 +209,17 @@ def crear_respaldo():
     for respaldo_antiguo in respaldos[MAX_RESPALDOS:]:
         respaldo_antiguo.unlink()
     return str(destino)
+
+
+def crear_respaldo_posterior():
+    try:
+        return crear_respaldo()
+    except Exception as e:
+        raise ErrorOperacion(
+            "⚠️ La operación sí se guardó, pero no se pudo crear el respaldo "
+            "automático. No repitas la operación; revisa el espacio y permisos "
+            "del directorio de respaldos."
+        ) from e
 
 
 def crear_dataframe_vacio(columnas):
@@ -311,23 +303,29 @@ def normalizar_numero_cheque(valor):
     if not texto or texto.lower() == "nan":
         return None
 
-    if texto.endswith(".0"):
-        texto = texto[:-2]
+    if not PATRON_NUMERO_CHEQUE.fullmatch(texto):
+        return None
 
-    if texto.isdigit():
-        numero = int(texto)
-        return str(numero) if numero > 0 else None
+    parte_entera = texto.split(".", 1)[0]
+    numero = int(parte_entera)
+    return str(numero) if numero > 0 else None
+
+
+def normalizar_fecha(valor):
+    if isinstance(valor, datetime):
+        return valor.date().isoformat()
+    if isinstance(valor, date):
+        return valor.isoformat()
+
+    texto = str(valor or "").strip()
+    if not PATRON_FECHA.fullmatch(texto):
+        raise ErrorOperacion("⚠️ La fecha debe usar el formato AAAA-MM-DD.")
 
     try:
-        numero_decimal = Decimal(texto)
-    except InvalidOperation:
-        return None
-
-    if numero_decimal != numero_decimal.to_integral_value(rounding=ROUND_HALF_UP):
-        return None
-
-    numero = int(numero_decimal)
-    return str(numero) if numero > 0 else None
+        datetime.strptime(texto, "%Y-%m-%d")
+    except ValueError as e:
+        raise ErrorOperacion("⚠️ La fecha indicada no es válida.") from e
+    return texto
 
 
 def pedir_texto_no_vacio(mensaje):
@@ -469,6 +467,10 @@ def cargar_depositos_registrados(cuenta_id=None):
 
 def cheque_ya_registrado(numero, cuenta_id=None):
     cuenta = obtener_cuenta(cuenta_id)
+    numero = normalizar_numero_cheque(numero)
+    if not numero:
+        return False
+
     inicializar_db()
     with conectar_db() as conexion:
         fila = conexion.execute(
@@ -490,7 +492,9 @@ def registrar_deposito_datos(monto, descripcion, fecha=None, cuenta_id=None):
     if not descripcion:
         raise ErrorOperacion("⚠️ Error: el campo no puede quedar vacío.")
 
-    fecha = fecha or datetime.now().strftime("%Y-%m-%d")
+    if fecha is None:
+        fecha = datetime.now().strftime("%Y-%m-%d")
+    fecha = normalizar_fecha(fecha)
     descripcion = descripcion.upper()
 
     with transaccion() as conexion:
@@ -509,7 +513,7 @@ def registrar_deposito_datos(monto, descripcion, fecha=None, cuenta_id=None):
             f"{cuenta['banco']} / {cuenta['nombre']}: depósito "
             f"Q {formatear_monto(monto)}: {descripcion}",
         )
-    crear_respaldo()
+    crear_respaldo_posterior()
 
     return {
         "fecha": fecha,
@@ -548,10 +552,12 @@ def formatear_fecha_cheque(fecha):
     return f"{fecha_dt.day} de {meses[fecha_dt.month - 1]} del {fecha_dt.year}"
 
 
-def imprimir_cheque_pdf(num, fecha, nombre, monto, descripcion=""):
+def imprimir_cheque_pdf(
+    num, fecha, nombre, monto, descripcion="", archivo_salida=None
+):
     alto_cheque = 14 * cm
     ancho_cheque = 22 * cm
-    nombre_pdf = f"cheque_{num}.pdf"
+    nombre_pdf = archivo_salida or f"cheque_{num}.pdf"
 
     pdf = canvas.Canvas(nombre_pdf, pagesize=(ancho_cheque, alto_cheque))
 
@@ -602,6 +608,8 @@ def imprimir_cheque_pdf(num, fecha, nombre, monto, descripcion=""):
             abrir_pdf_silenciosamente(["xdg-open", nombre_pdf])
     except Exception as e:
         print(f"⚠️ Abre el PDF manual. Error: {e}")
+        return False
+    return True
 
 
 def abrir_pdf_silenciosamente(comando):
@@ -627,6 +635,22 @@ def guardar_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_id=None
 
 def guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_id=None):
     cuenta = obtener_cuenta(cuenta_id)
+    num = normalizar_numero_cheque(num)
+    if not num:
+        raise ErrorOperacion("⚠️ Error: el número de cheque debe ser mayor que cero.")
+
+    fecha = normalizar_fecha(fecha)
+    nombre = str(nombre or "").strip()
+    if not nombre:
+        raise ErrorOperacion("⚠️ Error: el campo no puede quedar vacío.")
+
+    monto = convertir_monto(monto)
+    if monto is None:
+        raise ErrorOperacion("⚠️ Error: Solo usar números y punto decimal.")
+    if monto <= 0:
+        raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
+
+    descripcion = str(descripcion or "").strip()
     try:
         with transaccion() as conexion:
             conexion.execute(
@@ -650,7 +674,7 @@ def guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_
             )
     except sqlite3.IntegrityError as e:
         raise ErrorOperacion(f"⚠️ El cheque {num} ya existe en el historial.") from e
-    crear_respaldo()
+    crear_respaldo_posterior()
 
 
 def emitir_cheque_datos(
@@ -674,14 +698,38 @@ def emitir_cheque_datos(
     if cheque_ya_registrado(num_cheque, cuenta["id"]):
         raise ErrorOperacion(f"⚠️ El cheque {num_cheque} ya existe en el historial.")
 
-    fecha = fecha or datetime.now().strftime("%Y-%m-%d")
+    if fecha is None:
+        fecha = datetime.now().strftime("%Y-%m-%d")
+    fecha = normalizar_fecha(fecha)
     nombre = nombre.upper()
     descripcion = str(descripcion or "").strip().upper()
+    nombre_pdf = f"cheque_{cuenta['id']}_{num_cheque}.pdf"
 
     guardar_cheque_en_archivo(
         num_cheque, fecha, nombre, monto, descripcion, cuenta["id"]
     )
-    imprimir_cheque_pdf(num_cheque, fecha, nombre, monto, descripcion)
+    try:
+        impresion_enviada = imprimir_cheque_pdf(
+            num_cheque,
+            fecha,
+            nombre,
+            monto,
+            descripcion,
+            archivo_salida=nombre_pdf,
+        )
+    except Exception as e:
+        raise ErrorOperacion(
+            f"⚠️ El cheque {num_cheque} fue registrado, pero no se pudo generar "
+            "el PDF. Usa la opción de reimpresión."
+        ) from e
+
+    if impresion_enviada:
+        mensaje = "✅ Cheque registrado y listo para imprimir con éxito."
+    else:
+        mensaje = (
+            "⚠️ Cheque registrado y PDF generado, pero no se pudo abrir o enviar "
+            "a impresión. Abre el archivo manualmente."
+        )
 
     return {
         "num": num_cheque,
@@ -690,8 +738,9 @@ def emitir_cheque_datos(
         "descripcion": descripcion,
         "cuenta_id": cuenta["id"],
         "monto": monto,
-        "pdf": f"cheque_{num_cheque}.pdf",
-        "mensaje": "✅ Cheque registrado y listo para imprimir con éxito.",
+        "pdf": nombre_pdf,
+        "impresion_enviada": impresion_enviada,
+        "mensaje": mensaje,
     }
 
 
@@ -715,23 +764,19 @@ def registrar_e_imprimir():
         print(f"⚠️ El cheque {num_cheque} ya existe en el historial.")
         input("\nPresiona ENTER para ingresar otro número de cheque...")
 
-    fecha_actual = datetime.now().strftime("%Y-%m-%d")
-
     try:
-        guardar_en_archivo(
+        resultado = emitir_cheque_datos(
             num_cheque,
-            fecha_actual,
             nombre,
             monto,
-            descripcion,
-            cuenta["id"],
+            descripcion=descripcion,
+            cuenta_id=cuenta["id"],
         )
-        imprimir_cheque_pdf(num_cheque, fecha_actual, nombre, monto, descripcion)
     except Exception as e:
         print(f"⚠️ No se pudo completar la emisión del cheque: {e}")
         return
 
-    print("✅ Cheque registrado y listo para imprimir con éxito.")
+    print(resultado["mensaje"])
 
 
 def reimprimir_cheque_numero(num_cheque, cuenta_id=None):
@@ -749,16 +794,23 @@ def reimprimir_cheque_numero(num_cheque, cuenta_id=None):
         raise ErrorOperacion(f"⚠️ El cheque {num_cheque} no existe en los registros.")
 
     cheque = coincidencias.iloc[-1]
+    if str(cheque["Estado"]).upper() == "ANULADO":
+        raise ErrorOperacion(
+            f"⚠️ El cheque {num_cheque} está anulado y no se puede reimprimir."
+        )
+
     monto = convertir_monto(cheque["Monto"])
     if monto is None:
         raise ErrorOperacion(f"⚠️ El cheque {num_cheque} tiene un monto inválido.")
 
-    imprimir_cheque_pdf(
+    nombre_pdf = f"cheque_{cuenta['id']}_{num_cheque}.pdf"
+    impresion_enviada = imprimir_cheque_pdf(
         num_cheque,
         cheque["Fecha"],
         cheque["Nombre"],
         monto,
         cheque["Descripcion"],
+        archivo_salida=nombre_pdf,
     )
     with transaccion() as conexion:
         registrar_auditoria(
@@ -766,9 +818,15 @@ def reimprimir_cheque_numero(num_cheque, cuenta_id=None):
             "REIMPRIMIR",
             "CHEQUE",
             num_cheque,
-            "Se generó una nueva copia del cheque.",
+            f"{cuenta['banco']} / {cuenta['nombre']}: se generó una nueva copia.",
         )
-    return f"✅ Cheque {num_cheque} listo para volver a imprimir."
+    crear_respaldo_posterior()
+    if impresion_enviada:
+        return f"✅ Cheque {num_cheque} listo para volver a imprimir."
+    return (
+        f"⚠️ Se generó el PDF del cheque {num_cheque}, pero no se pudo abrir o "
+        "enviar a impresión. Abre el archivo manualmente."
+    )
 
 
 def reimprimir_cheque():
@@ -796,7 +854,25 @@ def anular_cheque_numero(num_anular, cuenta_id=None):
         raise ErrorOperacion("⚠️ Error: el número de cheque debe ser mayor que cero.")
 
     with transaccion() as conexion:
-        cursor = conexion.execute(
+        cheque = conexion.execute(
+            """
+            SELECT estado FROM cheques
+            WHERE cuenta_id = ? AND numero = ?
+            """,
+            (cuenta["id"], num_anular),
+        ).fetchone()
+        if cheque is None:
+            total = conexion.execute(
+                "SELECT COUNT(*) FROM cheques WHERE cuenta_id = ?",
+                (cuenta["id"],),
+            ).fetchone()[0]
+            if total == 0:
+                raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
+            raise ErrorOperacion(f"⚠️ El cheque {num_anular} no existe en los registros.")
+        if cheque["estado"] == "ANULADO":
+            raise ErrorOperacion(f"⚠️ El cheque {num_anular} ya está anulado.")
+
+        conexion.execute(
             """
             UPDATE cheques
             SET estado = 'ANULADO', actualizado_en = CURRENT_TIMESTAMP
@@ -804,11 +880,6 @@ def anular_cheque_numero(num_anular, cuenta_id=None):
             """,
             (cuenta["id"], num_anular),
         )
-        if cursor.rowcount == 0:
-            total = conexion.execute("SELECT COUNT(*) FROM cheques").fetchone()[0]
-            if total == 0:
-                raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
-            raise ErrorOperacion(f"⚠️ El cheque {num_anular} no existe en los registros.")
         registrar_auditoria(
             conexion,
             "ANULAR",
@@ -816,7 +887,7 @@ def anular_cheque_numero(num_anular, cuenta_id=None):
             num_anular,
             "Estado cambiado a ANULADO.",
         )
-    crear_respaldo()
+    crear_respaldo_posterior()
 
     mensaje = f"🚫 ¡Hecho! El cheque {num_anular} ha sido marcado como ANULADO."
     return {"num": num_anular, "cantidad": 1, "mensaje": mensaje}
@@ -855,12 +926,14 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None):
         col_num = columnas_banco.get("num_cheque")
         col_monto = columnas_banco.get("monto")
 
-        if not col_num or not col_monto:
+        if col_num is None or col_monto is None:
             raise ErrorOperacion("⚠️ El archivo del banco debe incluir las columnas 'Num_cheque' y 'Monto'.")
 
         df_banco = df_banco.copy()
+        df_banco["Num_original"] = df_banco[col_num]
         df_banco["Num_norm"] = df_banco[col_num].map(normalizar_numero_cheque)
         df_banco["Monto_valor"] = df_banco[col_monto].map(convertir_monto)
+        filas_numero_invalido = df_banco[df_banco["Num_norm"].isna()].copy()
         df_banco = df_banco[df_banco["Num_norm"].notna()].copy()
 
         cheques = []
@@ -889,7 +962,25 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None):
 
             monto_nuestro = fila["Monto_valor"]
             if len(cobrado) > 1:
-                montos_validos = cobrado["Monto_valor"].dropna().tolist()
+                montos = cobrado["Monto_valor"].tolist()
+                if any(monto is None for monto in montos):
+                    mensaje = (
+                        f"🚨 Cheque {num} aparece {len(cobrado)} veces en el banco "
+                        "y al menos un monto es inválido."
+                    )
+                    cheques.append(
+                        {
+                            "num": num,
+                            "estado": estado,
+                            "resultado": "DUPLICADO_INVALIDO",
+                            "monto_nuestro": monto_nuestro,
+                            "monto_banco": None,
+                            "mensaje": mensaje,
+                        }
+                    )
+                    continue
+
+                montos_validos = cobrado["Monto_valor"].tolist()
                 total_banco = sum(montos_validos, Decimal("0.00"))
                 mensaje = (
                     f"🚨 Cheque {num} aparece {len(cobrado)} veces en el banco "
@@ -945,6 +1036,36 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None):
                 )
                 no_registrados.append({"num": num_bco, "monto": monto_banco, "mensaje": mensaje})
 
+        for _, fila_banco in filas_numero_invalido.iterrows():
+            valor_original = fila_banco["Num_original"]
+            try:
+                sin_valor = pd.isna(valor_original)
+            except TypeError:
+                sin_valor = False
+            num_texto = (
+                "N/D"
+                if sin_valor or not str(valor_original).strip()
+                else str(valor_original).strip()
+            )
+            monto_banco = fila_banco["Monto_valor"]
+            monto_texto = (
+                formatear_monto(monto_banco)
+                if monto_banco is not None
+                else "N/D"
+            )
+            mensaje = (
+                f"⚠️ Fila del banco con número de cheque inválido "
+                f"({num_texto}) y monto Q {monto_texto}."
+            )
+            no_registrados.append(
+                {
+                    "num": num_texto,
+                    "monto": monto_banco,
+                    "resultado": "INVALIDO",
+                    "mensaje": mensaje,
+                }
+            )
+
         return {
             "cuenta": cuenta,
             "cheques": cheques,
@@ -982,7 +1103,9 @@ def clear_ide_terminal():
 
 
 def obtener_reporte_movimientos(fecha=None, cuenta_id=None):
-    fecha = fecha or datetime.now().date()
+    if fecha is None:
+        fecha = datetime.now().date()
+    fecha = normalizar_fecha(fecha)
     periodo_actual = pd.Timestamp(fecha).to_period("M")
     total_cheques = Decimal("0.00")
     total_depositos = Decimal("0.00")
