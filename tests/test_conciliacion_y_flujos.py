@@ -106,6 +106,7 @@ def test_imprimir_pdf_cubre_linux_macos_windows_y_falla_de_apertura():
         def __init__(self):
             self.textos = []
             self.fuentes = []
+            self.traslados = []
             self.guardado = False
 
         def drawString(self, *args):
@@ -113,6 +114,9 @@ def test_imprimir_pdf_cubre_linux_macos_windows_y_falla_de_apertura():
 
         def setFont(self, *args):
             self.fuentes.append(args)
+
+        def translate(self, *args):
+            self.traslados.append(args)
 
         def save(self):
             self.guardado = True
@@ -132,10 +136,13 @@ def test_imprimir_pdf_cubre_linux_macos_windows_y_falla_de_apertura():
         main.imprimir_cheque_pdf("2", "2026-06-03", "A", "10")
     assert ejecutar.call_args.args[0][0] == "lp"
 
-    with patch("main.canvas.Canvas", return_value=PdfFalso()), \
+    pdf_windows = PdfFalso()
+    with patch("main.canvas.Canvas", return_value=pdf_windows) as crear_pdf, \
             patch("main.platform.system", return_value="Windows"), \
             patch("main.os.startfile", create=True) as startfile:
         main.imprimir_cheque_pdf("3", "2026-06-03", "A", "10")
+    crear_pdf.assert_called_once_with("cheque_3.pdf", pagesize=main.LETTER)
+    assert pdf_windows.traslados == [(0, main.LETTER[1] - 14 * main.cm)]
     startfile.assert_called_once_with("cheque_3.pdf", "print")
 
     salida = StringIO()
