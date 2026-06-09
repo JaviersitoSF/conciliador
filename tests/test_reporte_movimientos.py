@@ -214,7 +214,9 @@ class SistemaBancarioTests(unittest.TestCase):
         with patch("main.listar_cuentas_bancarias", return_value=cuentas), \
                 patch(
                     "builtins.input",
-                    side_effect=["x", "1", "10.00", "Proveedor", "Compra", "35"],
+                    side_effect=[
+                        "x", "1", "10.00", "Proveedor", "Compra", "35", "s",
+                    ],
                 ), \
                 patch("main.imprimir_cheque_pdf"), \
                 redirect_stdout(StringIO()):

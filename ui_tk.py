@@ -71,7 +71,19 @@ class ConciliadorApp(tk.Tk):
         self.cheque_num = self._campo(cheque, "Número de cheque", 0)
         self.cheque_nombre = self._campo(cheque, "Páguese a", 1)
         self.cheque_monto = self._campo(cheque, "Monto", 2)
-        ttk.Button(cheque, text="Emitir e imprimir", command=self.emitir_cheque).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        self.imprimir_cheque = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            cheque,
+            text="Imprimir cheque",
+            variable=self.imprimir_cheque,
+            command=self._actualizar_boton_cheque,
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.boton_emitir_cheque = ttk.Button(
+            cheque, text="Emitir e imprimir", command=self.emitir_cheque
+        )
+        self.boton_emitir_cheque.grid(
+            row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0)
+        )
 
         self.deposito_desc = self._campo(deposito, "Descripción", 0)
         self.deposito_monto = self._campo(deposito, "Monto", 1)
@@ -155,6 +167,14 @@ class ConciliadorApp(tk.Tk):
             tabla.column(columna, width=ancho, minwidth=80, anchor="w")
         return tabla
 
+    def _actualizar_boton_cheque(self):
+        texto = (
+            "Emitir e imprimir"
+            if self.imprimir_cheque.get()
+            else "Emitir sin imprimir"
+        )
+        self.boton_emitir_cheque.configure(text=texto)
+
     def emitir_cheque(self):
         try:
             resultado = core.emitir_cheque_datos(
@@ -162,6 +182,7 @@ class ConciliadorApp(tk.Tk):
                 self.cheque_nombre.get(),
                 self.cheque_monto.get(),
                 cuenta_id=self.cuenta_id_actual(),
+                imprimir=self.imprimir_cheque.get(),
             )
         except Exception as e:
             messagebox.showerror("No se pudo emitir", str(e))

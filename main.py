@@ -381,6 +381,16 @@ def pedir_numero_cheque(mensaje):
         return str(numero)
 
 
+def pedir_confirmacion(mensaje):
+    while True:
+        respuesta = input(mensaje).strip().lower()
+        if respuesta in {"s", "si", "sí"}:
+            return True
+        if respuesta in {"n", "no"}:
+            return False
+        print("⚠️ Responde S para sí o N para no.")
+
+
 def etiqueta_cuenta(cuenta):
     numero = cuenta["numero"]
     referencia = f" terminada en {numero[-4:]}" if numero else ""
@@ -692,7 +702,8 @@ def guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_
 
 
 def emitir_cheque_datos(
-    num_cheque, nombre, monto, fecha=None, descripcion="", cuenta_id=None
+    num_cheque, nombre, monto, fecha=None, descripcion="", cuenta_id=None,
+    imprimir=True,
 ):
     cuenta = obtener_cuenta(cuenta_id)
     num_cheque = normalizar_numero_cheque(num_cheque)
@@ -722,6 +733,19 @@ def emitir_cheque_datos(
     guardar_cheque_en_archivo(
         num_cheque, fecha, nombre, monto, descripcion, cuenta["id"]
     )
+    if not imprimir:
+        return {
+            "num": num_cheque,
+            "fecha": fecha,
+            "nombre": nombre,
+            "descripcion": descripcion,
+            "cuenta_id": cuenta["id"],
+            "monto": monto,
+            "pdf": None,
+            "impresion_enviada": False,
+            "mensaje": "✅ Cheque registrado sin imprimir.",
+        }
+
     try:
         impresion_enviada = imprimir_cheque_pdf(
             num_cheque,
@@ -778,6 +802,8 @@ def registrar_e_imprimir():
         print(f"⚠️ El cheque {num_cheque} ya existe en el historial.")
         input("\nPresiona ENTER para ingresar otro número de cheque...")
 
+    imprimir = pedir_confirmacion("¿Deseas imprimir el cheque? (S/N): ")
+
     try:
         resultado = emitir_cheque_datos(
             num_cheque,
@@ -785,6 +811,7 @@ def registrar_e_imprimir():
             monto,
             descripcion=descripcion,
             cuenta_id=cuenta["id"],
+            imprimir=imprimir,
         )
     except Exception as e:
         print(f"⚠️ No se pudo completar la emisión del cheque: {e}")

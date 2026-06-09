@@ -157,6 +157,23 @@ def test_emitir_advierte_si_pdf_existe_pero_no_se_pudo_abrir_o_imprimir():
     assert main.cheque_ya_registrado("16")
 
 
+def test_emitir_puede_registrar_sin_imprimir():
+    with patch("main.imprimir_cheque_pdf") as imprimir:
+        resultado = main.emitir_cheque_datos(
+            "17",
+            "PROVEEDOR",
+            "100",
+            fecha="2026-06-01",
+            imprimir=False,
+        )
+
+    imprimir.assert_not_called()
+    assert resultado["pdf"] is None
+    assert resultado["impresion_enviada"] is False
+    assert resultado["mensaje"] == "✅ Cheque registrado sin imprimir."
+    assert main.cheque_ya_registrado("17")
+
+
 def test_cheques_de_cuentas_distintas_generan_nombres_pdf_distintos():
     cuenta_a = main.crear_cuenta_bancaria("BANCO A", "Operativa", "001")
     cuenta_b = main.crear_cuenta_bancaria("BANCO B", "Operativa", "002")
@@ -232,4 +249,3 @@ def test_reporte_sin_movimientos_devuelve_totales_cero_y_dataframes_validos():
     assert reporte["saldo"] == Decimal("0.00")
     assert reporte["cheques"].empty
     assert reporte["depositos"].empty
-
