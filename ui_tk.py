@@ -65,32 +65,48 @@ class ConciliadorApp(tk.Tk):
         cheque.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 12))
         deposito = ttk.LabelFrame(contenedor, text="Registrar depósito", padding=14)
         deposito.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 12))
-        anular = ttk.LabelFrame(contenedor, text="Anular cheque", padding=14)
-        anular.grid(row=1, column=0, sticky="new", padx=(0, 8))
 
         self.cheque_num = self._campo(cheque, "Número de cheque", 0)
         self.cheque_nombre = self._campo(cheque, "Páguese a", 1)
-        self.cheque_monto = self._campo(cheque, "Monto", 2)
+        self.cheque_descripcion = self._campo(cheque, "Descripción", 2)
+        self.cheque_monto = self._campo(cheque, "Monto", 3)
         self.imprimir_cheque = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             cheque,
             text="Imprimir cheque",
             variable=self.imprimir_cheque,
             command=self._actualizar_boton_cheque,
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.boton_emitir_cheque = ttk.Button(
             cheque, text="Emitir e imprimir", command=self.emitir_cheque
         )
         self.boton_emitir_cheque.grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0)
+            row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0)
         )
 
         self.deposito_desc = self._campo(deposito, "Descripción", 0)
         self.deposito_monto = self._campo(deposito, "Monto", 1)
         ttk.Button(deposito, text="Registrar depósito", command=self.registrar_deposito).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
 
+        acciones_cheque = ttk.Frame(contenedor)
+        acciones_cheque.grid(row=1, column=0, sticky="new", padx=(0, 8))
+        acciones_cheque.columnconfigure(0, weight=1)
+
+        anular = ttk.LabelFrame(acciones_cheque, text="Anular cheque", padding=14)
+        anular.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.anular_num = self._campo(anular, "Número de cheque", 0)
         ttk.Button(anular, text="Marcar como anulado", command=self.anular_cheque).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+
+        reimprimir = ttk.LabelFrame(
+            acciones_cheque, text="Volver a imprimir un cheque", padding=14
+        )
+        reimprimir.grid(row=1, column=0, sticky="ew")
+        self.reimprimir_num = self._campo(reimprimir, "Número de cheque", 0)
+        ttk.Button(
+            reimprimir,
+            text="Generar e imprimir otra copia",
+            command=self.reimprimir_cheque,
+        ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
 
         historial = ttk.LabelFrame(contenedor, text="Cheques recientes", padding=10)
         historial.grid(row=1, column=1, sticky="nsew", padx=(8, 0))
@@ -176,11 +192,19 @@ class ConciliadorApp(tk.Tk):
         self.boton_emitir_cheque.configure(text=texto)
 
     def emitir_cheque(self):
+        descripcion = self.cheque_descripcion.get().strip()
+        if not descripcion:
+            messagebox.showerror(
+                "No se pudo emitir",
+                "⚠️ Error: el campo no puede quedar vacío.",
+            )
+            return
         try:
             resultado = core.emitir_cheque_datos(
                 self.cheque_num.get(),
                 self.cheque_nombre.get(),
                 self.cheque_monto.get(),
+                descripcion=descripcion,
                 cuenta_id=self.cuenta_id_actual(),
                 imprimir=self.imprimir_cheque.get(),
             )
@@ -189,6 +213,7 @@ class ConciliadorApp(tk.Tk):
             return
         self.cheque_num.delete(0, tk.END)
         self.cheque_nombre.delete(0, tk.END)
+        self.cheque_descripcion.delete(0, tk.END)
         self.cheque_monto.delete(0, tk.END)
         self.refrescar_todo()
         messagebox.showinfo("Cheque emitido", resultado["mensaje"])
@@ -220,6 +245,17 @@ class ConciliadorApp(tk.Tk):
         self.refrescar_todo()
         messagebox.showinfo("Cheque anulado", resultado["mensaje"])
 
+    def reimprimir_cheque(self):
+        try:
+            mensaje = core.reimprimir_cheque_numero(
+                self.reimprimir_num.get(), self.cuenta_id_actual()
+            )
+        except Exception as e:
+            messagebox.showerror("No se pudo reimprimir", str(e))
+            return
+        self.reimprimir_num.delete(0, tk.END)
+        messagebox.showinfo("Cheque listo", mensaje)
+
     def conciliar(self):
         self._limpiar_tabla(self.tabla_conciliacion)
         self._limpiar_tabla(self.tabla_no_registrados)
@@ -246,6 +282,7 @@ class ConciliadorApp(tk.Tk):
         self._cargar_selector_cuentas()
         self._cargar_cheques()
         self._cargar_reporte()
+        self._limpiar_conciliacion()
 
     def _cargar_selector_cuentas(self):
         cuenta_actual = self.cuenta_id_actual(requerida=False)
@@ -288,8 +325,10 @@ class ConciliadorApp(tk.Tk):
         numero = simpledialog.askstring(
             "Nueva cuenta", "Número de cuenta (opcional):", parent=self
         )
+        if numero is None:
+            return
         try:
-            cuenta_id = core.crear_cuenta_bancaria(banco, nombre, numero or "")
+            cuenta_id = core.crear_cuenta_bancaria(banco, nombre, numero)
         except Exception as e:
             messagebox.showerror("No se pudo crear", str(e))
             return
@@ -299,6 +338,10 @@ class ConciliadorApp(tk.Tk):
                 self.selector_cuenta.current(indice)
                 break
         self.refrescar_todo()
+        messagebox.showinfo(
+            "Cuenta registrada",
+            f"✅ Cuenta bancaria registrada con identificador {cuenta_id}.",
+        )
 
     def _cargar_cheques(self):
         self._limpiar_tabla(self.tabla_cheques)
@@ -339,6 +382,10 @@ class ConciliadorApp(tk.Tk):
     def _limpiar_tabla(self, tabla):
         for item in tabla.get_children():
             tabla.delete(item)
+
+    def _limpiar_conciliacion(self):
+        self._limpiar_tabla(self.tabla_conciliacion)
+        self._limpiar_tabla(self.tabla_no_registrados)
 
 
 def main():
