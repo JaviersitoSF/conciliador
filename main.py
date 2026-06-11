@@ -596,7 +596,7 @@ def imprimir_cheque_pdf(
     monto_en_letras = num2words(int(entero), lang="es").upper()
     texto_oficial = f"{monto_en_letras} QUETZALES CON {centavos}/100"
 
-    # Coordenadas de impresión en centímetros.
+    # Coordenadas de impresión para BI
     fecha_x = 1.8
     fecha_y = 13
 
