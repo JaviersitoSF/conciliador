@@ -599,14 +599,19 @@ def imprimir_cheque_pdf(
     # Coordenadas de impresión en centímetros.
     fecha_x = 1.8
     fecha_y = 13
-    nombre_x = 2.1
+
+    nombre_x = 1.9
     nombre_y = 12.1
+
     monto_x = 15
-    monto_y = 12.8
+    monto_y = 13
+
     no_negociable_x = 2.5
     no_negociable_y = 10
+
     monto_letras_x = 1
-    monto_letras_y = 11.1
+    monto_letras_y = 11.2
+
     descripcion_x = 2.5
     descripcion_y = 5.9
 
