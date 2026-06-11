@@ -591,6 +591,8 @@ def imprimir_cheque_pdf(
     else:
         pdf = canvas.Canvas(nombre_pdf, pagesize=(ancho_cheque, alto_cheque))
 
+    pdf.translate(-2 * cm, 1.5 * cm)
+
     monto_formateado = formatear_monto_impresion(monto)
     entero, centavos = formatear_monto(monto).split(".")
     monto_en_letras = num2words(int(entero), lang="es").upper()

@@ -142,7 +142,10 @@ def test_imprimir_pdf_cubre_linux_macos_windows_y_falla_de_apertura():
             patch("main.os.startfile", create=True) as startfile:
         main.imprimir_cheque_pdf("3", "2026-06-03", "A", "10")
     crear_pdf.assert_called_once_with("cheque_3.pdf", pagesize=main.LETTER)
-    assert pdf_windows.traslados == [(0, main.LETTER[1] - 14 * main.cm)]
+    assert pdf_windows.traslados == [
+        (0, main.LETTER[1] - 14 * main.cm),
+        (-2 * main.cm, 1.5 * main.cm),
+    ]
     startfile.assert_called_once_with("cheque_3.pdf", "print")
 
     salida = StringIO()
