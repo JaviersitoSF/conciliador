@@ -111,6 +111,19 @@ def test_cancelar_numero_opcional_cancela_creacion_de_cuenta():
     crear.assert_not_called()
 
 
+def test_configurar_formato_abre_dialogo_para_cuenta_seleccionada():
+    app = SimpleNamespace(cuenta_id_actual=Mock(return_value=9))
+    formato = dict(ui_tk.core.FORMATO_IMPRESION_DEFAULT)
+
+    with patch.object(
+        ui_tk.core, "obtener_formato_impresion", return_value=formato
+    ) as obtener, patch.object(ui_tk, "DialogoFormatoImpresion") as dialogo:
+        ui_tk.ConciliadorApp.configurar_formato_impresion(app)
+
+    obtener.assert_called_once_with(9)
+    dialogo.assert_called_once_with(app, 9, formato)
+
+
 def test_refrescar_invalida_resultados_de_conciliacion_anteriores():
     app = SimpleNamespace(
         _cargar_selector_cuentas=Mock(),

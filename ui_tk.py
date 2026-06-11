@@ -35,6 +35,11 @@ class ConciliadorApp(tk.Tk):
         ttk.Label(encabezado, text="Sistema de Control Bancario", style="Title.TLabel").pack(side="left")
         ttk.Button(encabezado, text="Actualizar", command=self.refrescar_todo).pack(side="right")
         ttk.Button(encabezado, text="Nueva cuenta", command=self.crear_cuenta).pack(side="right", padx=8)
+        ttk.Button(
+            encabezado,
+            text="Formato de impresión",
+            command=self.configurar_formato_impresion,
+        ).pack(side="right")
         self.selector_cuenta = ttk.Combobox(encabezado, state="readonly", width=36)
         self.selector_cuenta.pack(side="right", padx=8)
         self.selector_cuenta.bind("<<ComboboxSelected>>", lambda _evento: self.refrescar_todo())
@@ -343,6 +348,15 @@ class ConciliadorApp(tk.Tk):
             f"✅ Cuenta bancaria registrada con identificador {cuenta_id}.",
         )
 
+    def configurar_formato_impresion(self):
+        try:
+            cuenta_id = self.cuenta_id_actual()
+            formato = core.obtener_formato_impresion(cuenta_id)
+        except Exception as e:
+            messagebox.showerror("Formato de impresión", str(e))
+            return
+        DialogoFormatoImpresion(self, cuenta_id, formato)
+
     def _cargar_cheques(self):
         self._limpiar_tabla(self.tabla_cheques)
         df = core.cargar_cheques_registrados(self.cuenta_id_actual())
@@ -386,6 +400,105 @@ class ConciliadorApp(tk.Tk):
     def _limpiar_conciliacion(self):
         self._limpiar_tabla(self.tabla_conciliacion)
         self._limpiar_tabla(self.tabla_no_registrados)
+
+
+class DialogoFormatoImpresion(tk.Toplevel):
+    CAMPOS = (
+        ("ancho", "Ancho del cheque"),
+        ("alto", "Alto del cheque"),
+        ("fecha_x", "Fecha X"),
+        ("fecha_y", "Fecha Y"),
+        ("nombre_x", "Beneficiario X"),
+        ("nombre_y", "Beneficiario Y"),
+        ("monto_x", "Monto X"),
+        ("monto_y", "Monto Y"),
+        ("no_negociable_x", "No negociable X"),
+        ("no_negociable_y", "No negociable Y"),
+        ("monto_letras_x", "Monto en letras X"),
+        ("monto_letras_y", "Monto en letras Y"),
+        ("descripcion_x", "Descripción X"),
+        ("descripcion_y", "Descripción Y"),
+    )
+
+    def __init__(self, padre, cuenta_id, formato):
+        super().__init__(padre)
+        self.cuenta_id = cuenta_id
+        self.title("Formato de impresión")
+        self.resizable(False, False)
+        self.transient(padre)
+        self.grab_set()
+
+        ttk.Label(
+            self,
+            text="Medidas y posiciones en centímetros",
+            style="Title.TLabel",
+        ).grid(row=0, column=0, columnspan=4, padx=18, pady=(16, 10))
+
+        self.entradas = {}
+        for posicion, (campo, etiqueta) in enumerate(self.CAMPOS):
+            columna = 0 if posicion < 7 else 2
+            fila = posicion + 1 if posicion < 7 else posicion - 6
+            ttk.Label(self, text=etiqueta).grid(
+                row=fila, column=columna, sticky="w", padx=(18, 8), pady=5
+            )
+            entrada = ttk.Entry(self, width=12)
+            entrada.grid(
+                row=fila, column=columna + 1, sticky="ew", padx=(0, 18), pady=5
+            )
+            self.entradas[campo] = entrada
+
+        acciones = ttk.Frame(self)
+        acciones.grid(row=8, column=0, columnspan=4, sticky="ew", padx=18, pady=16)
+        ttk.Button(
+            acciones, text="Restaurar defaults", command=self.restaurar_defaults
+        ).pack(side="left")
+        ttk.Button(
+            acciones, text="Probar impresión", command=self.probar_impresion
+        ).pack(side="left", padx=8)
+        ttk.Button(acciones, text="Cancelar", command=self.destroy).pack(side="right")
+        ttk.Button(acciones, text="Guardar", command=self.guardar).pack(
+            side="right", padx=8
+        )
+        self._cargar(formato)
+
+    def _cargar(self, formato):
+        for campo, entrada in self.entradas.items():
+            entrada.delete(0, tk.END)
+            entrada.insert(0, f"{formato[campo]:g}")
+
+    def _valores(self):
+        return {
+            campo: entrada.get().strip()
+            for campo, entrada in self.entradas.items()
+        }
+
+    def restaurar_defaults(self):
+        self._cargar(core.FORMATO_IMPRESION_DEFAULT)
+
+    def probar_impresion(self):
+        try:
+            enviada = core.probar_formato_impresion(self._valores())
+        except Exception as e:
+            messagebox.showerror("Prueba de impresión", str(e), parent=self)
+            return
+        if enviada:
+            mensaje = "La prueba fue enviada a impresión."
+        else:
+            mensaje = "Se generó el PDF, pero no se pudo enviar a impresión."
+        messagebox.showinfo("Prueba de impresión", mensaje, parent=self)
+
+    def guardar(self):
+        try:
+            core.guardar_formato_impresion(self.cuenta_id, self._valores())
+        except Exception as e:
+            messagebox.showerror("Formato de impresión", str(e), parent=self)
+            return
+        messagebox.showinfo(
+            "Formato de impresión",
+            "Formato guardado para la cuenta seleccionada.",
+            parent=self,
+        )
+        self.destroy()
 
 
 def main():

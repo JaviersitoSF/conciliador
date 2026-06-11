@@ -85,6 +85,54 @@ def test_cuentas_validan_obligatorios_duplicados_e_inactivas():
         main.obtener_cuenta(cuenta_id)
 
 
+def test_cuentas_tienen_formatos_de_impresion_independientes():
+    cuenta_a = main.crear_cuenta_bancaria("BANCO A", "Operativa")
+    cuenta_b = main.crear_cuenta_bancaria("BANCO B", "Operativa")
+    formato_a = dict(main.FORMATO_IMPRESION_DEFAULT, fecha_x=3.25, ancho=23)
+
+    guardado = main.guardar_formato_impresion(cuenta_a, formato_a)
+
+    assert guardado["fecha_x"] == 3.25
+    assert main.obtener_formato_impresion(cuenta_a)["ancho"] == 23
+    assert main.obtener_formato_impresion(cuenta_b) == main.FORMATO_IMPRESION_DEFAULT
+
+
+def test_formato_rechaza_coordenadas_fuera_del_cheque():
+    formato = dict(main.FORMATO_IMPRESION_DEFAULT, nombre_x=23)
+
+    with pytest.raises(main.ErrorOperacion, match="fuera del cheque"):
+        main.guardar_formato_impresion(1, formato)
+
+
+def test_emitir_y_reimprimir_usan_formato_de_la_cuenta():
+    cuenta_id = main.crear_cuenta_bancaria("BANCO", "Cheques")
+    formato = dict(main.FORMATO_IMPRESION_DEFAULT, monto_x=16.5)
+    main.guardar_formato_impresion(cuenta_id, formato)
+
+    with patch("main.imprimir_cheque_pdf", return_value=True) as imprimir:
+        main.emitir_cheque_datos(
+            "8", "PROVEEDOR", "50", fecha="2026-06-01",
+            descripcion="COMPRA", cuenta_id=cuenta_id,
+        )
+        main.reimprimir_cheque_numero("8", cuenta_id)
+
+    assert imprimir.call_count == 2
+    assert imprimir.call_args_list[0].kwargs["formato"]["monto_x"] == 16.5
+    assert imprimir.call_args_list[1].kwargs["formato"]["monto_x"] == 16.5
+
+
+def test_prueba_de_formato_no_registra_movimientos_ni_auditoria():
+    formato = dict(main.FORMATO_IMPRESION_DEFAULT, descripcion_y=6.5)
+
+    with patch("main.imprimir_cheque_pdf", return_value=True) as imprimir:
+        assert main.probar_formato_impresion(formato) is True
+
+    assert imprimir.call_args.kwargs["formato"]["descripcion_y"] == 6.5
+    assert main.cargar_cheques_registrados().empty
+    with main.conectar_db() as conexion:
+        assert conexion.execute("SELECT COUNT(*) FROM auditoria").fetchone()[0] == 0
+
+
 @pytest.mark.parametrize(
     ("monto", "descripcion"),
     [("malo", "VENTA"), ("0", "VENTA"), ("-1", "VENTA"), ("10", "")],

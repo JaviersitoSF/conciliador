@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pandas as pd
 from num2words import num2words
-from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.units import cm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
@@ -27,6 +26,22 @@ PATRON_MONTO = re.compile(r"^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$")
 PATRON_NUMERO_CHEQUE = re.compile(r"^\d+(?:\.0+)?$")
 PATRON_FECHA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_RESPALDOS = 10
+FORMATO_IMPRESION_DEFAULT = {
+    "ancho": 22.0,
+    "alto": 14.0,
+    "fecha_x": 1.8,
+    "fecha_y": 13.0,
+    "nombre_x": 1.9,
+    "nombre_y": 12.1,
+    "monto_x": 15.0,
+    "monto_y": 13.0,
+    "no_negociable_x": 2.5,
+    "no_negociable_y": 10.0,
+    "monto_letras_x": 1.0,
+    "monto_letras_y": 11.2,
+    "descripcion_x": 2.5,
+    "descripcion_y": 5.9,
+}
 
 
 class ErrorOperacion(ValueError):
@@ -103,6 +118,25 @@ def inicializar_db():
                 entidad_id TEXT,
                 detalle TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS formatos_impresion (
+                cuenta_id INTEGER PRIMARY KEY,
+                ancho REAL NOT NULL,
+                alto REAL NOT NULL,
+                fecha_x REAL NOT NULL,
+                fecha_y REAL NOT NULL,
+                nombre_x REAL NOT NULL,
+                nombre_y REAL NOT NULL,
+                monto_x REAL NOT NULL,
+                monto_y REAL NOT NULL,
+                no_negociable_x REAL NOT NULL,
+                no_negociable_y REAL NOT NULL,
+                monto_letras_x REAL NOT NULL,
+                monto_letras_y REAL NOT NULL,
+                descripcion_x REAL NOT NULL,
+                descripcion_y REAL NOT NULL,
+                FOREIGN KEY (cuenta_id) REFERENCES cuentas_bancarias(id)
+            );
             """
         )
         conexion.execute(
@@ -111,6 +145,19 @@ def inicializar_db():
             VALUES (1, 'SIN CONFIGURAR', 'Cuenta principal', '')
             """
         )
+        _insertar_formato_default(conexion, 1)
+
+
+def _insertar_formato_default(conexion, cuenta_id):
+    campos = ", ".join(FORMATO_IMPRESION_DEFAULT)
+    marcadores = ", ".join("?" for _ in FORMATO_IMPRESION_DEFAULT)
+    conexion.execute(
+        f"""
+        INSERT OR IGNORE INTO formatos_impresion (cuenta_id, {campos})
+        VALUES (?, {marcadores})
+        """,
+        (cuenta_id, *FORMATO_IMPRESION_DEFAULT.values()),
+    )
 
 
 def listar_cuentas_bancarias(solo_activas=True):
@@ -143,6 +190,7 @@ def crear_cuenta_bancaria(banco, nombre, numero=""):
                 (banco, nombre, numero),
             )
             cuenta_id = cursor.lastrowid
+            _insertar_formato_default(conexion, cuenta_id)
             registrar_auditoria(
                 conexion,
                 "CREAR",
@@ -176,6 +224,61 @@ def obtener_cuenta(cuenta_id=None):
     if cuenta is None:
         raise ErrorOperacion("⚠️ La cuenta bancaria no existe o está inactiva.")
     return dict(cuenta)
+
+
+def validar_formato_impresion(valores):
+    formato = {}
+    for campo in FORMATO_IMPRESION_DEFAULT:
+        try:
+            valor = float(valores[campo])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ErrorOperacion(
+                f"⚠️ El valor de {campo.replace('_', ' ')} debe ser numérico."
+            ) from e
+        if valor < 0:
+            raise ErrorOperacion("⚠️ Los valores del formato no pueden ser negativos.")
+        formato[campo] = valor
+
+    if formato["ancho"] <= 0 or formato["alto"] <= 0:
+        raise ErrorOperacion("⚠️ El ancho y el alto deben ser mayores que cero.")
+    for campo, valor in formato.items():
+        if campo.endswith("_x") and valor > formato["ancho"]:
+            raise ErrorOperacion(f"⚠️ {campo.replace('_', ' ')} queda fuera del cheque.")
+        if campo.endswith("_y") and valor > formato["alto"]:
+            raise ErrorOperacion(f"⚠️ {campo.replace('_', ' ')} queda fuera del cheque.")
+    return formato
+
+
+def obtener_formato_impresion(cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    with conectar_db() as conexion:
+        fila = conexion.execute(
+            "SELECT * FROM formatos_impresion WHERE cuenta_id = ?",
+            (cuenta["id"],),
+        ).fetchone()
+    if fila is None:
+        raise ErrorOperacion("⚠️ La cuenta no tiene formato de impresión configurado.")
+    return {campo: float(fila[campo]) for campo in FORMATO_IMPRESION_DEFAULT}
+
+
+def guardar_formato_impresion(cuenta_id, valores):
+    cuenta = obtener_cuenta(cuenta_id)
+    formato = validar_formato_impresion(valores)
+    asignaciones = ", ".join(f"{campo} = ?" for campo in formato)
+    with transaccion() as conexion:
+        conexion.execute(
+            f"UPDATE formatos_impresion SET {asignaciones} WHERE cuenta_id = ?",
+            (*formato.values(), cuenta["id"]),
+        )
+        registrar_auditoria(
+            conexion,
+            "ACTUALIZAR",
+            "FORMATO_IMPRESION",
+            cuenta["id"],
+            f"{cuenta['banco']} / {cuenta['nombre']}: formato de cheque actualizado.",
+        )
+    crear_respaldo_posterior()
+    return formato
 
 
 @contextmanager
@@ -578,68 +681,56 @@ def formatear_fecha_cheque(fecha):
 
 
 def imprimir_cheque_pdf(
-    num, fecha, nombre, monto, descripcion="", archivo_salida=None
+    num, fecha, nombre, monto, descripcion="", archivo_salida=None, formato=None
 ):
-    alto_cheque = 14 * cm
-    ancho_cheque = 22 * cm
+    formato = validar_formato_impresion(
+        formato or FORMATO_IMPRESION_DEFAULT
+    )
+    alto_cheque = formato["alto"] * cm
+    ancho_cheque = formato["ancho"] * cm
     nombre_pdf = archivo_salida or f"cheque_{num}.pdf"
     sistema = platform.system()
 
-    if sistema == "Windows":
-        pdf = canvas.Canvas(nombre_pdf, pagesize=LETTER)
-        pdf.translate(0, LETTER[1] - alto_cheque)
-    else:
-        pdf = canvas.Canvas(nombre_pdf, pagesize=(ancho_cheque, alto_cheque))
+    pdf = canvas.Canvas(nombre_pdf, pagesize=(ancho_cheque, alto_cheque))
 
     monto_formateado = formatear_monto_impresion(monto)
     entero, centavos = formatear_monto(monto).split(".")
     monto_en_letras = num2words(int(entero), lang="es").upper()
     texto_oficial = f"{monto_en_letras} QUETZALES CON {centavos}/100"
 
-    # Coordenadas de impresión para BI
-    fecha_x = 1.8
-    fecha_y = 13
-
-    nombre_x = 1.9
-    nombre_y = 12.1
-
-    monto_x = 15
-    monto_y = 13
-
-    no_negociable_x = 2.5
-    no_negociable_y = 10
-
-    monto_letras_x = 1
-    monto_letras_y = 11.2
-
-    descripcion_x = 2.5
-    descripcion_y = 5.9
-
     pdf.drawString(
-        fecha_x * cm,
-        fecha_y * cm,
+        formato["fecha_x"] * cm,
+        formato["fecha_y"] * cm,
         f"Guatemala {formatear_fecha_cheque(fecha)}",
     )
-    pdf.drawString(nombre_x * cm, nombre_y * cm, nombre)
+    pdf.drawString(formato["nombre_x"] * cm, formato["nombre_y"] * cm, nombre)
     pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(monto_x * cm, monto_y * cm, monto_formateado)
+    pdf.drawString(formato["monto_x"] * cm, formato["monto_y"] * cm, monto_formateado)
     pdf.setFont("Helvetica", 10)
     pdf.drawString(
-        no_negociable_x * cm,
-        no_negociable_y * cm,
+        formato["no_negociable_x"] * cm,
+        formato["no_negociable_y"] * cm,
         "NO NEGOCIABLE",
     )
 
-    ancho_disponible = ancho_cheque - 4.3 * cm - 1 * cm
+    ancho_disponible = max(1 * cm, ancho_cheque - formato["monto_letras_x"] * cm - 1 * cm)
     tamano_texto = min(
         10,
         ancho_disponible * 10 / stringWidth(texto_oficial, "Helvetica", 10),
     )
     pdf.setFont("Helvetica", max(7, tamano_texto))
-    pdf.drawString(monto_letras_x * cm, monto_letras_y * cm, texto_oficial)
+    pdf.drawString(
+        formato["monto_letras_x"] * cm,
+        formato["monto_letras_y"] * cm,
+        texto_oficial,
+    )
     pdf.setFont("Helvetica", 10)
     if descripcion:
-        pdf.drawString(descripcion_x * cm, descripcion_y * cm, descripcion)
+        pdf.drawString(
+            formato["descripcion_x"] * cm,
+            formato["descripcion_y"] * cm,
+            descripcion,
+        )
 
     pdf.save()
 
@@ -655,7 +746,8 @@ def imprimir_cheque_pdf(
         elif sistema == "Darwin":
             abrir_pdf_silenciosamente([
                 "lp",
-                "-o", "media=Custom.220x140mm",
+                "-o",
+                f"media=Custom.{formato['ancho'] * 10:g}x{formato['alto'] * 10:g}mm",
                 "-o", "scaling=100",
                 "-o", "position=top-left",
                 nombre_pdf,
@@ -683,6 +775,19 @@ def abrir_pdf_silenciosamente(comando):
         if detalle:
             raise RuntimeError(detalle) from e
         raise RuntimeError(f"el comando fallo con codigo {e.returncode}") from e
+
+
+def probar_formato_impresion(valores, archivo_salida="prueba_formato_cheque.pdf"):
+    formato = validar_formato_impresion(valores)
+    return imprimir_cheque_pdf(
+        "0001",
+        datetime.now().strftime("%Y-%m-%d"),
+        "NOMBRE DE BENEFICIARIO",
+        Decimal("1234.56"),
+        "DESCRIPCION DE PRUEBA",
+        archivo_salida=archivo_salida,
+        formato=formato,
+    )
 
 
 def guardar_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_id=None):
@@ -787,6 +892,7 @@ def emitir_cheque_datos(
             monto,
             descripcion,
             archivo_salida=nombre_pdf,
+            formato=obtener_formato_impresion(cuenta["id"]),
         )
     except Exception as e:
         raise ErrorOperacion(
@@ -885,6 +991,7 @@ def reimprimir_cheque_numero(num_cheque, cuenta_id=None):
         monto,
         cheque["Descripcion"],
         archivo_salida=nombre_pdf,
+        formato=obtener_formato_impresion(cuenta["id"]),
     )
     with transaccion() as conexion:
         registrar_auditoria(
