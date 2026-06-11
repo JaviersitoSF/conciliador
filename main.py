@@ -591,19 +591,39 @@ def imprimir_cheque_pdf(
     else:
         pdf = canvas.Canvas(nombre_pdf, pagesize=(ancho_cheque, alto_cheque))
 
-    pdf.translate(-2 * cm, 1.5 * cm)
-
     monto_formateado = formatear_monto_impresion(monto)
     entero, centavos = formatear_monto(monto).split(".")
     monto_en_letras = num2words(int(entero), lang="es").upper()
     texto_oficial = f"{monto_en_letras} QUETZALES CON {centavos}/100"
 
-    pdf.drawString(5 * cm, 11.5 * cm, f"Guatemala {formatear_fecha_cheque(fecha)}")
-    pdf.drawString(4.3 * cm, 10.8 * cm, nombre)
+    # Coordenadas de impresión en centímetros.
+    fecha_x = 2
+    fecha_y = 13
+    nombre_x = 2.3
+    nombre_y = 12
+    monto_x = 14.8
+    monto_y = 13
+    no_negociable_x = 2.5
+    no_negociable_y = 10
+    monto_letras_x = 2.3
+    monto_letras_y = 11
+    descripcion_x = 2.5
+    descripcion_y = 5.9
+
+    pdf.drawString(
+        fecha_x * cm,
+        fecha_y * cm,
+        f"Guatemala {formatear_fecha_cheque(fecha)}",
+    )
+    pdf.drawString(nombre_x * cm, nombre_y * cm, nombre)
     pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(16.5 * cm, 11.5 * cm, monto_formateado)
+    pdf.drawString(monto_x * cm, monto_y * cm, monto_formateado)
     pdf.setFont("Helvetica", 10)
-    pdf.drawString(4.5 * cm, 8.5 * cm, "NO NEGOCIABLE")
+    pdf.drawString(
+        no_negociable_x * cm,
+        no_negociable_y * cm,
+        "NO NEGOCIABLE",
+    )
 
     ancho_disponible = ancho_cheque - 4.3 * cm - 1 * cm
     tamano_texto = min(
@@ -611,10 +631,10 @@ def imprimir_cheque_pdf(
         ancho_disponible * 10 / stringWidth(texto_oficial, "Helvetica", 10),
     )
     pdf.setFont("Helvetica", max(7, tamano_texto))
-    pdf.drawString(4.3 * cm, 10 * cm, texto_oficial)
+    pdf.drawString(monto_letras_x * cm, monto_letras_y * cm, texto_oficial)
     pdf.setFont("Helvetica", 10)
     if descripcion:
-        pdf.drawString(4.5 * cm, alto_cheque - 9.6 * cm, descripcion)
+        pdf.drawString(descripcion_x * cm, descripcion_y * cm, descripcion)
 
     pdf.save()
 

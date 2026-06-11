@@ -127,7 +127,7 @@ def test_imprimir_pdf_cubre_linux_macos_windows_y_falla_de_apertura():
             patch("main.subprocess.run") as ejecutar:
         main.imprimir_cheque_pdf("1", "2026-06-03", "A", "1234567.89")
     assert pdf.guardado
-    assert (16.5 * main.cm, 11.5 * main.cm, "1,234,567.89") in pdf.textos
+    assert (14.5 * main.cm, 13 * main.cm, "1,234,567.89") in pdf.textos
     ejecutar.assert_called_once()
 
     with patch("main.canvas.Canvas", return_value=PdfFalso()), \
@@ -142,10 +142,7 @@ def test_imprimir_pdf_cubre_linux_macos_windows_y_falla_de_apertura():
             patch("main.os.startfile", create=True) as startfile:
         main.imprimir_cheque_pdf("3", "2026-06-03", "A", "10")
     crear_pdf.assert_called_once_with("cheque_3.pdf", pagesize=main.LETTER)
-    assert pdf_windows.traslados == [
-        (0, main.LETTER[1] - 14 * main.cm),
-        (-2 * main.cm, 1.5 * main.cm),
-    ]
+    assert pdf_windows.traslados == [(0, main.LETTER[1] - 14 * main.cm)]
     startfile.assert_called_once_with("cheque_3.pdf", "print")
 
     salida = StringIO()
