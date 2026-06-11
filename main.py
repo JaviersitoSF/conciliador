@@ -600,13 +600,13 @@ def imprimir_cheque_pdf(
     fecha_x = 2
     fecha_y = 13
     nombre_x = 2.3
-    nombre_y = 12
-    monto_x = 14.8
+    nombre_y = 12.2
+    monto_x = 15
     monto_y = 13
     no_negociable_x = 2.5
     no_negociable_y = 10
-    monto_letras_x = 2.3
-    monto_letras_y = 11
+    monto_letras_x = 0
+    monto_letras_y = 11.3
     descripcion_x = 2.5
     descripcion_y = 5.9
 
