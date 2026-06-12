@@ -1,4 +1,6 @@
 import tkinter as tk
+from calendar import monthrange
+from datetime import date
 from tkinter import filedialog, messagebox, ttk
 
 from conciliador import operations as core
@@ -86,30 +88,34 @@ class ConciliadorApp(tk.Tk):
         self.cheque_nombre = self._campo(cheque, "Páguese a", 1)
         self.cheque_descripcion = self._campo(cheque, "Descripción", 2)
         self.cheque_monto = self._campo(cheque, "Monto", 3)
+        self.cheque_fecha = self._campo(cheque, "Fecha (AAAA-MM-DD)", 4)
+        self.cheque_fecha.insert(0, date.today().isoformat())
         self.imprimir_cheque = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             cheque,
             text="Imprimir cheque",
             variable=self.imprimir_cheque,
             command=self._actualizar_boton_cheque,
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.boton_emitir_cheque = ttk.Button(
             cheque, text="Emitir e imprimir", command=self.emitir_cheque
         )
         self.boton_emitir_cheque.grid(
-            row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0)
+            row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0)
         )
         self.cheque_monto.bind("<Return>", lambda _evento: self.emitir_cheque())
 
         self.deposito_desc = self._campo(deposito, "Descripción", 0)
         self.deposito_monto = self._campo(deposito, "Monto", 1)
+        self.deposito_fecha = self._campo(deposito, "Fecha (AAAA-MM-DD)", 2)
+        self.deposito_fecha.insert(0, date.today().isoformat())
         self.boton_registrar_deposito = ttk.Button(
             deposito,
             text="Registrar depósito",
             command=self.registrar_deposito,
         )
         self.boton_registrar_deposito.grid(
-            row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+            row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0)
         )
         self.deposito_monto.bind(
             "<Return>", lambda _evento: self.registrar_deposito()
@@ -154,6 +160,15 @@ class ConciliadorApp(tk.Tk):
         self.tabla_cheques = self._tabla(historial, ("Num", "Fecha", "Nombre", "Monto", "Estado"))
 
     def _crear_reporte(self):
+        acciones = ttk.Frame(self.tab_reporte)
+        acciones.pack(fill="x", pady=(0, 12))
+        ttk.Label(acciones, text="Mes del corte:").pack(side="left")
+        self.reporte_mes = self._selector_mes(acciones)
+        self.reporte_mes.pack(side="left", padx=8)
+        ttk.Button(
+            acciones, text="Ver mes", command=self._cargar_reporte
+        ).pack(side="left")
+
         metricas = ttk.Frame(self.tab_reporte, style="Panel.TFrame", padding=12)
         metricas.pack(fill="x", pady=(0, 12))
         metricas.columnconfigure((0, 1, 2), weight=1)
@@ -184,6 +199,9 @@ class ConciliadorApp(tk.Tk):
     def _crear_conciliacion(self):
         acciones = ttk.Frame(self.tab_conciliacion)
         acciones.pack(fill="x", pady=(0, 12))
+        ttk.Label(acciones, text="Mes del estado:").pack(side="left")
+        self.conciliacion_mes = self._selector_mes(acciones)
+        self.conciliacion_mes.pack(side="left", padx=(8, 12))
         self.boton_conciliar = ttk.Button(
             acciones,
             text="Seleccionar estado y conciliar",
@@ -214,6 +232,31 @@ class ConciliadorApp(tk.Tk):
         entrada.grid(row=fila, column=1, sticky="ew", pady=5)
         padre.columnconfigure(1, weight=1)
         return entrada
+
+    def _selector_mes(self, padre):
+        hoy = date.today()
+        valores = []
+        anio, mes = hoy.year, hoy.month
+        for _ in range(60):
+            valores.append(f"{anio:04d}-{mes:02d}")
+            mes -= 1
+            if mes == 0:
+                anio -= 1
+                mes = 12
+        selector = ttk.Combobox(padre, width=9, values=valores)
+        selector.current(0)
+        return selector
+
+    @staticmethod
+    def _fin_de_mes(valor):
+        try:
+            anio_texto, mes_texto = valor.split("-")
+            anio, mes = int(anio_texto), int(mes_texto)
+            return f"{anio:04d}-{mes:02d}-{monthrange(anio, mes)[1]:02d}"
+        except (AttributeError, TypeError, ValueError) as e:
+            raise core.ErrorOperacion(
+                "⚠️ Seleccione un mes válido en formato AAAA-MM."
+            ) from e
 
     def _tabla(self, padre, columnas):
         tabla = ttk.Treeview(padre, columns=columnas, show="headings")
@@ -315,6 +358,7 @@ class ConciliadorApp(tk.Tk):
                 self.cheque_num.get(),
                 self.cheque_nombre.get(),
                 self.cheque_monto.get(),
+                fecha=self.cheque_fecha.get(),
                 descripcion=descripcion,
                 cuenta_id=self.cuenta_id_actual(),
                 imprimir=self.imprimir_cheque.get(),
@@ -326,6 +370,8 @@ class ConciliadorApp(tk.Tk):
         self.cheque_nombre.delete(0, tk.END)
         self.cheque_descripcion.delete(0, tk.END)
         self.cheque_monto.delete(0, tk.END)
+        self.cheque_fecha.delete(0, tk.END)
+        self.cheque_fecha.insert(0, date.today().isoformat())
         self.refrescar_todo()
         messagebox.showinfo("Cheque emitido", resultado["mensaje"])
 
@@ -339,6 +385,7 @@ class ConciliadorApp(tk.Tk):
             resultado = service.registrar_deposito(
                 self.deposito_monto.get(),
                 self.deposito_desc.get(),
+                fecha=self.deposito_fecha.get(),
                 cuenta_id=self.cuenta_id_actual(),
             )
         except Exception as e:
@@ -346,6 +393,8 @@ class ConciliadorApp(tk.Tk):
             return
         self.deposito_desc.delete(0, tk.END)
         self.deposito_monto.delete(0, tk.END)
+        self.deposito_fecha.delete(0, tk.END)
+        self.deposito_fecha.insert(0, date.today().isoformat())
         self.refrescar_todo()
         messagebox.showinfo("Depósito registrado", resultado["mensaje"])
 
@@ -416,7 +465,9 @@ class ConciliadorApp(tk.Tk):
         self._limpiar_tabla(self.tabla_no_registrados)
         try:
             resultado = service.conciliar(
-                self.cuenta_id_actual(), archivo
+                self.cuenta_id_actual(),
+                archivo,
+                self._fin_de_mes(self.conciliacion_mes.get()),
             )
         except Exception as e:
             messagebox.showerror("Conciliación", str(e))
@@ -545,9 +596,14 @@ class ConciliadorApp(tk.Tk):
         self._mostrar_estado_vacio(self.tabla_cheques, "No hay cheques registrados")
 
     def _cargar_reporte(self):
-        reporte = service.obtener_reporte(
-            cuenta_id=self.cuenta_id_actual()
-        )
+        try:
+            fecha_corte = self._fin_de_mes(self.reporte_mes.get())
+            reporte = service.obtener_reporte(
+                fecha_corte, self.cuenta_id_actual()
+            )
+        except Exception as e:
+            messagebox.showerror("Corte de caja", str(e))
+            return
         self.lbl_ingresos.configure(text=f"Ingresos: Q {core.formatear_monto(reporte['total_depositos'])}")
         self.lbl_egresos.configure(text=f"Egresos: Q {core.formatear_monto(reporte['total_cheques'])}")
         self.lbl_saldo.configure(text=f"Saldo: Q {core.formatear_monto(reporte['saldo'])}")

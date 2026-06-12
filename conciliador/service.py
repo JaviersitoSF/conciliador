@@ -33,8 +33,10 @@ class ConciliadorService:
     def obtener_reporte(self, fecha=None, cuenta_id=None):
         return self.operations.obtener_reporte_movimientos(fecha, cuenta_id)
 
-    def conciliar(self, cuenta_id=None, archivo_banco=None):
-        return self.operations.obtener_conciliacion(cuenta_id, archivo_banco)
+    def conciliar(self, cuenta_id=None, archivo_banco=None, fecha_corte=None):
+        return self.operations.obtener_conciliacion(
+            cuenta_id, archivo_banco, fecha_corte
+        )
 
     def obtener_formato(self, cuenta_id=None):
         return self.operations.obtener_formato_impresion(cuenta_id)

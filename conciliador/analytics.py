@@ -10,7 +10,9 @@ from .movements import cargar_cheques_registrados, cargar_depositos_registrados,
 from .storage import obtener_cuenta
 
 ARCHIVO_BANCO = "estado_cuenta.xlsx"
-def obtener_conciliacion(cuenta_id=None, archivo_banco=None):
+
+
+def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
     cuenta = obtener_cuenta(cuenta_id)
     archivo_banco = archivo_banco or ARCHIVO_BANCO
     if not os.path.exists(archivo_banco):
@@ -18,8 +20,15 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None):
 
     try:
         df_nuestro = cargar_cheques_registrados(cuenta["id"])
+        if fecha_corte is not None:
+            fecha_corte = normalizar_fecha(fecha_corte)
+            corte = pd.Timestamp(fecha_corte)
+            df_nuestro = df_nuestro[
+                df_nuestro["Fecha_dt"].notna()
+                & (df_nuestro["Fecha_dt"] <= corte)
+            ].copy()
         if df_nuestro.empty:
-            raise ErrorOperacion("⚠️ No hay registro de cheques aún.")
+            raise ErrorOperacion("⚠️ No hay cheques registrados hasta la fecha de corte.")
         df_banco = pd.read_excel(archivo_banco)
 
         columnas_banco = {str(col).strip().lower(): col for col in df_banco.columns}
@@ -168,6 +177,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None):
 
         return {
             "cuenta": cuenta,
+            "fecha_corte": fecha_corte,
             "cheques": cheques,
             "no_registrados": no_registrados,
         }

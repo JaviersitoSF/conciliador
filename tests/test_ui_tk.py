@@ -16,6 +16,9 @@ class EntradaFalsa:
         self.eliminada = True
         self.valor = ""
 
+    def insert(self, _indice, valor):
+        self.valor = valor
+
 
 class VariableFalsa:
     def __init__(self, valor):
@@ -31,12 +34,14 @@ def test_emitir_cheque_incluye_descripcion_y_opcion_de_impresion():
         EntradaFalsa("Proveedor"),
         EntradaFalsa("Compra de inventario"),
         EntradaFalsa("150.25"),
+        EntradaFalsa("2026-05-31"),
     ]
     app = SimpleNamespace(
         cheque_num=entradas[0],
         cheque_nombre=entradas[1],
         cheque_descripcion=entradas[2],
         cheque_monto=entradas[3],
+        cheque_fecha=entradas[4],
         imprimir_cheque=VariableFalsa(False),
         cuenta_id_actual=Mock(return_value=7),
         refrescar_todo=Mock(),
@@ -53,6 +58,7 @@ def test_emitir_cheque_incluye_descripcion_y_opcion_de_impresion():
         "12",
         "Proveedor",
         "150.25",
+        fecha="2026-05-31",
         descripcion="Compra de inventario",
         cuenta_id=7,
         imprimir=False,
@@ -60,6 +66,11 @@ def test_emitir_cheque_incluye_descripcion_y_opcion_de_impresion():
     assert all(entrada.eliminada for entrada in entradas)
     app.refrescar_todo.assert_called_once_with()
     informar.assert_called_once_with("Cheque emitido", "Cheque registrado")
+
+
+def test_fin_de_mes_usa_el_ultimo_dia_del_periodo():
+    assert ui_tk.ConciliadorApp._fin_de_mes("2024-02") == "2024-02-29"
+    assert ui_tk.ConciliadorApp._fin_de_mes("2026-06") == "2026-06-30"
 
 
 def test_emitir_cheque_rechaza_descripcion_vacia_como_la_tui():

@@ -81,6 +81,23 @@ def test_conciliacion_no_descarta_filas_con_numero_invalido():
     assert all("inválido" in fila["mensaje"].lower() for fila in invalidos)
 
 
+def test_conciliacion_incluye_pendientes_anteriores_y_excluye_cheques_futuros():
+    main.guardar_cheque_en_archivo("1", "2026-05-20", "ANTERIOR", "100")
+    main.guardar_cheque_en_archivo("2", "2026-06-15", "DEL MES", "200")
+    main.guardar_cheque_en_archivo("3", "2026-07-01", "FUTURO", "300")
+    pd.DataFrame(
+        {"Num_cheque": [1, 2], "Monto": ["100", "200"]}
+    ).to_excel(main.ARCHIVO_BANCO, index=False)
+
+    resultado = main.obtener_conciliacion(
+        archivo_banco=main.ARCHIVO_BANCO,
+        fecha_corte="2026-06-30",
+    )
+
+    assert [fila["num"] for fila in resultado["cheques"]] == ["1", "2"]
+    assert resultado["fecha_corte"] == "2026-06-30"
+
+
 def test_abrir_pdf_propaga_detalle_del_comando():
     error = subprocess.CalledProcessError(
         1, ["lp", "cheque.pdf"], stderr="impresora no disponible"
