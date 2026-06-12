@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migra chequeras y cheques de un dump MariaDB del ERP a Conciliador."""
+"""Migra chequeras, cheques y depósitos de un dump MariaDB del ERP."""
 
 import argparse
 import re
@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
 
-TABLAS = {"erp_chequera", "erp_cheque_cab"}
+TABLAS = {"erp_chequera", "erp_cheque_cab", "erp_deposito_cab"}
 INSERT_RE = re.compile(r"^INSERT INTO `([^`]+)` VALUES ")
 
 
@@ -144,19 +144,23 @@ def migrar(origen, destino):
 
     chequeras = {}
     cheques = []
+    depositos = []
     for tabla, valores in leer_inserts(origen):
         filas = parsear_filas(valores)
         if tabla == "erp_chequera":
             for fila in filas:
                 chequeras[int(fila[0])] = fila
-        else:
+        elif tabla == "erp_cheque_cab":
             cheques.extend(filas)
+        else:
+            depositos.extend(filas)
 
     destino.parent.mkdir(parents=True, exist_ok=True)
     database = crear_base_datos(destino)
     conexion = database.connect()
     duplicados = 0
-    invalidos = 0
+    cheques_invalidos = 0
+    depositos_invalidos = 0
 
     try:
         conexion.execute("DELETE FROM formatos_impresion")
@@ -199,7 +203,7 @@ def migrar(origen, destino):
             chequera_id = int(fila[1])
             numero = int(fila[3])
             if chequera_id not in chequeras or numero <= 0:
-                invalidos += 1
+                cheques_invalidos += 1
                 continue
             razon_anula = (fila[24] or "").strip()
             estado = "ANULADO" if int(fila[8]) == 0 or razon_anula else "TRANSITO"
@@ -229,6 +233,42 @@ def migrar(origen, destino):
             except sqlite3.IntegrityError:
                 duplicados += 1
 
+        depositos_migrados = 0
+        for fila in depositos:
+            chequera_id = int(fila[1])
+            razon_anula = (fila[19] or "").strip()
+            try:
+                monto = monto_dos_decimales(fila[7])
+            except ValueError:
+                depositos_invalidos += 1
+                continue
+            if (
+                chequera_id not in chequeras
+                or Decimal(monto) <= 0
+                or razon_anula
+            ):
+                depositos_invalidos += 1
+                continue
+            descripcion = (fila[5] or fila[12] or "").strip()
+            if not descripcion:
+                descripcion = f"DEPÓSITO ERP {fila[3]}"
+            conexion.execute(
+                """
+                INSERT INTO depositos
+                    (cuenta_id, fecha, descripcion, monto, creado_en)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    chequera_id,
+                    str(fila[6])[:10],
+                    descripcion,
+                    monto,
+                    fila[17] or str(fila[6]),
+                ),
+            )
+            depositos_migrados += 1
+
+        cheques_migrados = len(cheques) - duplicados - cheques_invalidos
         conexion.execute(
             """
             INSERT INTO auditoria (accion, entidad, entidad_id, detalle)
@@ -236,15 +276,24 @@ def migrar(origen, destino):
             """,
             (
                 f"Origen: {origen.name}; cuentas: {len(chequeras)}; "
-                f"cheques: {len(cheques) - duplicados - invalidos}; "
-                f"duplicados omitidos: {duplicados}; inválidos omitidos: {invalidos}",
+                f"cheques: {cheques_migrados}; depósitos: {depositos_migrados}; "
+                f"cheques duplicados omitidos: {duplicados}; "
+                f"cheques inválidos omitidos: {cheques_invalidos}; "
+                f"depósitos inválidos o anulados omitidos: {depositos_invalidos}",
             ),
         )
         conexion.commit()
     finally:
         conexion.close()
 
-    return len(chequeras), len(cheques) - duplicados - invalidos, duplicados, invalidos
+    return (
+        len(chequeras),
+        cheques_migrados,
+        depositos_migrados,
+        duplicados,
+        cheques_invalidos,
+        depositos_invalidos,
+    )
 
 
 def main():
@@ -255,7 +304,9 @@ def main():
     resultado = migrar(args.origen, args.destino)
     print(
         f"Cuentas: {resultado[0]}; cheques: {resultado[1]}; "
-        f"duplicados: {resultado[2]}; inválidos: {resultado[3]}"
+        f"depósitos: {resultado[2]}; cheques duplicados: {resultado[3]}; "
+        f"cheques inválidos: {resultado[4]}; "
+        f"depósitos inválidos o anulados: {resultado[5]}"
     )
 
 
