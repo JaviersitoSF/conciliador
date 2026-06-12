@@ -515,7 +515,16 @@ def main(base_dir=None):
         )
         return 1
 
-    app = ConciliadorApp()
+    try:
+        app = ConciliadorApp()
+    except Exception as e:
+        logger.exception("No se pudo construir la interfaz grafica")
+        messagebox.showerror(
+            "Conciliador no pudo iniciar",
+            "No se pudo cargar la interfaz. El detalle está en:\n"
+            f"{paths.log_file}\n\n{e}",
+        )
+        return 1
 
     def report_callback_exception(exc_type, exc_value, exc_traceback):
         logger.error(

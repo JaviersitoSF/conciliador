@@ -235,8 +235,8 @@ def test_cheques_de_cuentas_distintas_generan_nombres_pdf_distintos():
         )
 
     assert resultado_a["pdf"] != resultado_b["pdf"]
-    assert resultado_a["pdf"] == f"cheque_{cuenta_a}_10.pdf"
-    assert resultado_b["pdf"] == f"cheque_{cuenta_b}_10.pdf"
+    assert resultado_a["pdf"].endswith(f"cheque_{cuenta_a}_10.pdf")
+    assert resultado_b["pdf"].endswith(f"cheque_{cuenta_b}_10.pdf")
     assert imprimir.call_count == 2
 
 

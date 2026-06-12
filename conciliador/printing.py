@@ -3,6 +3,7 @@ import platform
 import subprocess
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 
 from num2words import num2words
 from reportlab.lib.units import cm
@@ -11,6 +12,8 @@ from reportlab.pdfgen import canvas
 
 from .domain import convertir_monto
 from .errors import ErrorOperacion
+
+DIRECTORIO_EXPORTACIONES = Path(".")
 
 FORMATO_IMPRESION_DEFAULT = {
     "ancho": 22.0,
@@ -28,6 +31,19 @@ FORMATO_IMPRESION_DEFAULT = {
     "descripcion_x": 2.5,
     "descripcion_y": 5.9,
 }
+
+
+def configure_paths(paths):
+    global DIRECTORIO_EXPORTACIONES
+    DIRECTORIO_EXPORTACIONES = paths.exports_dir
+
+
+def resolver_archivo_salida(archivo_salida):
+    ruta = Path(archivo_salida)
+    if not ruta.is_absolute():
+        ruta = DIRECTORIO_EXPORTACIONES / ruta
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    return ruta
 
 
 def validar_formato_impresion(valores):
@@ -101,9 +117,9 @@ def imprimir_cheque_pdf(
     formato = validar_formato_impresion(formato or FORMATO_IMPRESION_DEFAULT)
     alto_cheque = formato["alto"] * cm
     ancho_cheque = formato["ancho"] * cm
-    nombre_pdf = archivo_salida or f"cheque_{num}.pdf"
+    nombre_pdf = resolver_archivo_salida(archivo_salida or f"cheque_{num}.pdf")
     sistema = platform.system()
-    pdf = canvas.Canvas(nombre_pdf, pagesize=(ancho_cheque, alto_cheque))
+    pdf = canvas.Canvas(str(nombre_pdf), pagesize=(ancho_cheque, alto_cheque))
     monto_formateado = formatear_monto_impresion(monto)
     entero, centavos = formatear_monto(monto).split(".")
     monto_en_letras = num2words(int(entero), lang="es").upper()
@@ -144,15 +160,15 @@ def imprimir_cheque_pdf(
             startfile = getattr(os, "startfile", None)
             if not callable(startfile):
                 raise AttributeError("os.startfile no esta disponible en este entorno")
-            startfile(nombre_pdf, "print")
+            startfile(str(nombre_pdf), "print")
         elif sistema == "Darwin":
             abrir_pdf_silenciosamente([
                 "lp", "-o",
                 f"media=Custom.{formato['ancho'] * 10:g}x{formato['alto'] * 10:g}mm",
-                "-o", "scaling=100", "-o", "position=top-left", nombre_pdf,
+                "-o", "scaling=100", "-o", "position=top-left", str(nombre_pdf),
             ])
         else:
-            abrir_pdf_silenciosamente(["xdg-open", nombre_pdf])
+            abrir_pdf_silenciosamente(["xdg-open", str(nombre_pdf)])
     except Exception as exc:
         print(f"⚠️ Abre el PDF manual. Error: {exc}")
         return False

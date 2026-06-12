@@ -138,3 +138,25 @@ def test_refrescar_invalida_resultados_de_conciliacion_anteriores():
     app._cargar_cheques.assert_called_once_with()
     app._cargar_reporte.assert_called_once_with()
     app._limpiar_conciliacion.assert_called_once_with()
+
+
+def test_main_registra_error_si_falla_construccion_inicial():
+    paths = SimpleNamespace(log_file="logs/conciliador.log")
+    logger = Mock()
+
+    with patch.object(
+        ui_tk,
+        "prepare_application",
+        return_value=(paths, logger, 1),
+    ), patch.object(
+        ui_tk, "ConciliadorApp", side_effect=RuntimeError("fallo inicial")
+    ), patch.object(ui_tk.messagebox, "showerror") as informar:
+        resultado = ui_tk.main()
+
+    assert resultado == 1
+    logger.exception.assert_called_once_with(
+        "No se pudo construir la interfaz grafica"
+    )
+    informar.assert_called_once()
+    assert "logs/conciliador.log" in informar.call_args.args[1]
+    assert "fallo inicial" in informar.call_args.args[1]

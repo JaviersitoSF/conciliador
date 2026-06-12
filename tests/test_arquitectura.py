@@ -7,6 +7,7 @@ from conciliador.database import Database
 from conciliador.errors import ErrorPersistencia
 from conciliador.migrations import LATEST_VERSION, SCHEMA_SQL, migrate
 from conciliador.paths import AppPaths
+from conciliador import printing
 
 
 def test_rutas_portables_no_dependen_del_cwd(tmp_path, monkeypatch):
@@ -18,6 +19,16 @@ def test_rutas_portables_no_dependen_del_cwd(tmp_path, monkeypatch):
     assert paths.database == portable / "data" / "conciliador.db"
     assert paths.log_file == portable / "logs" / "conciliador.log"
     assert paths.exports_dir == portable / "exports"
+
+
+def test_impresion_resuelve_archivos_relativos_en_exports(tmp_path, monkeypatch):
+    paths = AppPaths.portable(tmp_path / "portable")
+    monkeypatch.setattr(printing, "DIRECTORIO_EXPORTACIONES", paths.exports_dir)
+
+    ruta = printing.resolver_archivo_salida("cheque_1.pdf")
+
+    assert ruta == paths.exports_dir / "cheque_1.pdf"
+    assert paths.exports_dir.is_dir()
 
 
 def test_base_nueva_migra_y_repetir_es_inocuo(tmp_path):

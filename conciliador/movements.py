@@ -208,7 +208,9 @@ def emitir_cheque_datos(
     fecha = normalizar_fecha(fecha)
     nombre = nombre.upper()
     descripcion = str(descripcion or "").strip().upper()
-    nombre_pdf = f"cheque_{cuenta['id']}_{num_cheque}.pdf"
+    nombre_pdf = printing.resolver_archivo_salida(
+        f"cheque_{cuenta['id']}_{num_cheque}.pdf"
+    )
 
     guardar_cheque_en_archivo(
         num_cheque, fecha, nombre, monto, descripcion, cuenta["id"]
@@ -257,7 +259,7 @@ def emitir_cheque_datos(
         "descripcion": descripcion,
         "cuenta_id": cuenta["id"],
         "monto": monto,
-        "pdf": nombre_pdf,
+        "pdf": str(nombre_pdf),
         "impresion_enviada": impresion_enviada,
         "mensaje": mensaje,
     }
@@ -286,7 +288,9 @@ def reimprimir_cheque_numero(num_cheque, cuenta_id=None):
     if monto is None:
         raise ErrorOperacion(f"⚠️ El cheque {num_cheque} tiene un monto inválido.")
 
-    nombre_pdf = f"cheque_{cuenta['id']}_{num_cheque}.pdf"
+    nombre_pdf = printing.resolver_archivo_salida(
+        f"cheque_{cuenta['id']}_{num_cheque}.pdf"
+    )
     impresion_enviada = printing.imprimir_cheque_pdf(
         num_cheque,
         cheque["Fecha"],
