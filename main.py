@@ -6,7 +6,7 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +14,18 @@ from num2words import num2words
 from reportlab.lib.units import cm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
+
+from conciliador.domain import (
+    convertir_monto as convertir_monto_dominio,
+    normalizar_fecha as normalizar_fecha_dominio,
+    normalizar_numero_cheque as normalizar_numero_cheque_dominio,
+)
+from conciliador.errors import (
+    ConflictoOperacion,
+    ErrorOperacion,
+    ErrorPersistencia,
+    ErrorValidacion,
+)
 
 ARCHIVO_DATOS = "conciliador.db"
 ARCHIVO_BANCO = "estado_cuenta.xlsx"
@@ -42,10 +54,6 @@ FORMATO_IMPRESION_DEFAULT = {
     "descripcion_x": 2.5,
     "descripcion_y": 5.9,
 }
-
-
-class ErrorOperacion(ValueError):
-    """Error esperado en operaciones del sistema."""
 
 
 class ConexionSQLite(sqlite3.Connection):
@@ -348,49 +356,7 @@ def crear_dataframe_vacio(columnas):
 
 
 def convertir_monto(valor):
-    if valor is None:
-        return None
-
-    if isinstance(valor, Decimal):
-        return valor.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    try:
-        if pd.isna(valor):
-            return None
-    except TypeError:
-        pass
-
-    texto = str(valor).strip()
-    if not texto or texto.lower() == "nan":
-        return None
-
-    negativo = texto.startswith("(") and texto.endswith(")")
-    if negativo:
-        texto = texto[1:-1].strip()
-        if texto.startswith(("+", "-", "−")):
-            return None
-
-    texto = (
-        texto.replace("Q", "")
-        .replace("q", "")
-        .replace("$", "")
-        .replace("\xa0", "")
-        .replace(" ", "")
-        .replace("−", "-")
-    )
-
-    if not PATRON_MONTO.fullmatch(texto):
-        return None
-
-    try:
-        monto = Decimal(texto.replace(",", ""))
-    except InvalidOperation:
-        return None
-
-    if negativo:
-        monto = -monto
-
-    return monto.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return convertir_monto_dominio(valor)
 
 
 def formatear_monto(valor):
@@ -408,42 +374,11 @@ def formatear_monto_impresion(valor):
 
 
 def normalizar_numero_cheque(valor):
-    if valor is None:
-        return None
-
-    try:
-        if pd.isna(valor):
-            return None
-    except TypeError:
-        pass
-
-    texto = str(valor).strip()
-    if not texto or texto.lower() == "nan":
-        return None
-
-    if not PATRON_NUMERO_CHEQUE.fullmatch(texto):
-        return None
-
-    parte_entera = texto.split(".", 1)[0]
-    numero = int(parte_entera)
-    return str(numero) if numero > 0 else None
+    return normalizar_numero_cheque_dominio(valor)
 
 
 def normalizar_fecha(valor):
-    if isinstance(valor, datetime):
-        return valor.date().isoformat()
-    if isinstance(valor, date):
-        return valor.isoformat()
-
-    texto = str(valor or "").strip()
-    if not PATRON_FECHA.fullmatch(texto):
-        raise ErrorOperacion("⚠️ La fecha debe usar el formato AAAA-MM-DD.")
-
-    try:
-        datetime.strptime(texto, "%Y-%m-%d")
-    except ValueError as e:
-        raise ErrorOperacion("⚠️ La fecha indicada no es válida.") from e
-    return texto
+    return normalizar_fecha_dominio(valor)
 
 
 def pedir_texto_no_vacio(mensaje):

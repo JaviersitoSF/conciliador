@@ -29,9 +29,6 @@ jobs:
       - name: Ejecutar pruebas
         run: python -m pytest
 
-      - name: Construir ejecutable de terminal
-        run: python -m PyInstaller --clean --noconfirm Conciliador-Terminal.spec
-
       - name: Construir ejecutable con interfaz
         run: python -m PyInstaller --clean --noconfirm Conciliador-UI.spec
 
@@ -39,7 +36,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Conciliador-Windows
-          path: |
-            dist/Conciliador-Terminal.exe
-            dist/Conciliador-UI.exe
+          path: dist/Conciliador-UI.exe
           if-no-files-found: error

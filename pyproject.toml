@@ -1,0 +1,23 @@
+[project]
+name = "conciliador"
+version = "1.0.0"
+requires-python = "==3.12.*"
+dependencies = [
+    "pandas==3.0.3",
+    "openpyxl==3.1.5",
+    "num2words==0.5.14",
+    "reportlab==4.5.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.coverage.run]
+branch = true
+source = ["conciliador", "main.py", "ui_tk.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

@@ -2,6 +2,10 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import main as core
+from conciliador.runtime import prepare_application
+from conciliador.service import ConciliadorService
+
+service = ConciliadorService(core)
 
 
 class ConciliadorApp(tk.Tk):
@@ -205,7 +209,7 @@ class ConciliadorApp(tk.Tk):
             )
             return
         try:
-            resultado = core.emitir_cheque_datos(
+            resultado = service.emitir_cheque(
                 self.cheque_num.get(),
                 self.cheque_nombre.get(),
                 self.cheque_monto.get(),
@@ -225,7 +229,7 @@ class ConciliadorApp(tk.Tk):
 
     def registrar_deposito(self):
         try:
-            resultado = core.registrar_deposito_datos(
+            resultado = service.registrar_deposito(
                 self.deposito_monto.get(),
                 self.deposito_desc.get(),
                 cuenta_id=self.cuenta_id_actual(),
@@ -240,7 +244,7 @@ class ConciliadorApp(tk.Tk):
 
     def anular_cheque(self):
         try:
-            resultado = core.anular_cheque_numero(
+            resultado = service.anular_cheque(
                 self.anular_num.get(), self.cuenta_id_actual()
             )
         except Exception as e:
@@ -252,7 +256,7 @@ class ConciliadorApp(tk.Tk):
 
     def reimprimir_cheque(self):
         try:
-            mensaje = core.reimprimir_cheque_numero(
+            mensaje = service.reimprimir_cheque(
                 self.reimprimir_num.get(), self.cuenta_id_actual()
             )
         except Exception as e:
@@ -271,7 +275,7 @@ class ConciliadorApp(tk.Tk):
         if not archivo:
             return
         try:
-            resultado = core.obtener_conciliacion(
+            resultado = service.conciliar(
                 self.cuenta_id_actual(), archivo
             )
         except Exception as e:
@@ -291,7 +295,7 @@ class ConciliadorApp(tk.Tk):
 
     def _cargar_selector_cuentas(self):
         cuenta_actual = self.cuenta_id_actual(requerida=False)
-        self.cuentas = core.listar_cuentas_bancarias()
+        self.cuentas = service.listar_cuentas()
         valores = [
             f"{cuenta['id']} | {cuenta['banco']} | {cuenta['nombre']}"
             for cuenta in self.cuentas
@@ -333,7 +337,7 @@ class ConciliadorApp(tk.Tk):
         if numero is None:
             return
         try:
-            cuenta_id = core.crear_cuenta_bancaria(banco, nombre, numero)
+            cuenta_id = service.crear_cuenta(banco, nombre, numero)
         except Exception as e:
             messagebox.showerror("No se pudo crear", str(e))
             return
@@ -351,7 +355,7 @@ class ConciliadorApp(tk.Tk):
     def configurar_formato_impresion(self):
         try:
             cuenta_id = self.cuenta_id_actual()
-            formato = core.obtener_formato_impresion(cuenta_id)
+            formato = service.obtener_formato(cuenta_id)
         except Exception as e:
             messagebox.showerror("Formato de impresión", str(e))
             return
@@ -359,7 +363,7 @@ class ConciliadorApp(tk.Tk):
 
     def _cargar_cheques(self):
         self._limpiar_tabla(self.tabla_cheques)
-        df = core.cargar_cheques_registrados(self.cuenta_id_actual())
+        df = service.obtener_cheques(self.cuenta_id_actual())
         if df.empty:
             return
         for _, fila in df.tail(30).iloc[::-1].iterrows():
@@ -370,7 +374,7 @@ class ConciliadorApp(tk.Tk):
             )
 
     def _cargar_reporte(self):
-        reporte = core.obtener_reporte_movimientos(
+        reporte = service.obtener_reporte(
             cuenta_id=self.cuenta_id_actual()
         )
         self.lbl_ingresos.configure(text=f"Ingresos: Q {core.formatear_monto(reporte['total_depositos'])}")
@@ -489,7 +493,7 @@ class DialogoFormatoImpresion(tk.Toplevel):
 
     def guardar(self):
         try:
-            core.guardar_formato_impresion(self.cuenta_id, self._valores())
+            service.guardar_formato(self.cuenta_id, self._valores())
         except Exception as e:
             messagebox.showerror("Formato de impresión", str(e), parent=self)
             return
@@ -501,9 +505,33 @@ class DialogoFormatoImpresion(tk.Toplevel):
         self.destroy()
 
 
-def main():
+def main(base_dir=None):
+    try:
+        paths, logger, _version = prepare_application(core, base_dir)
+    except Exception as e:
+        messagebox.showerror(
+            "Conciliador no pudo iniciar",
+            f"No se pudo preparar la base de datos:\n{e}",
+        )
+        return 1
+
     app = ConciliadorApp()
+
+    def report_callback_exception(exc_type, exc_value, exc_traceback):
+        logger.error(
+            "Excepcion no controlada en Tkinter",
+            exc_info=(exc_type, exc_value, exc_traceback),
+        )
+        messagebox.showerror(
+            "Error inesperado",
+            "Ocurrió un error inesperado. El detalle está en:\n"
+            f"{paths.log_file}",
+            parent=app,
+        )
+
+    app.report_callback_exception = report_callback_exception
     app.mainloop()
+    return 0
 
 
 if __name__ == "__main__":
