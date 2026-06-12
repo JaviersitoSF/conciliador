@@ -136,9 +136,7 @@ def listar_cuentas_bancarias(solo_activas=True):
         return [dict(fila) for fila in conexion.execute(consulta).fetchall()]
 
 def crear_cuenta_bancaria(banco, nombre, numero=""):
-    banco = str(banco or "").strip().upper()
-    nombre = str(nombre or "").strip()
-    numero = str(numero or "").strip()
+    banco, nombre, numero = _normalizar_datos_cuenta(banco, nombre, numero)
     if not banco or not nombre:
         raise ErrorOperacion("⚠️ Banco y nombre de cuenta son obligatorios.")
 
@@ -164,6 +162,40 @@ def crear_cuenta_bancaria(banco, nombre, numero=""):
         raise ErrorOperacion("⚠️ Esa cuenta bancaria ya está registrada.") from e
     crear_respaldo_posterior()
     return cuenta_id
+
+def _normalizar_datos_cuenta(banco, nombre, numero):
+    banco = str(banco or "").strip().upper()
+    nombre = str(nombre or "").strip()
+    numero = str(numero or "").strip()
+    return banco, nombre, numero
+
+def actualizar_cuenta_bancaria(cuenta_id, banco, nombre, numero=""):
+    cuenta = obtener_cuenta(cuenta_id)
+    banco, nombre, numero = _normalizar_datos_cuenta(banco, nombre, numero)
+    if not banco or not nombre:
+        raise ErrorOperacion("⚠️ Banco y nombre de cuenta son obligatorios.")
+
+    try:
+        with transaccion() as conexion:
+            conexion.execute(
+                """
+                UPDATE cuentas_bancarias
+                SET banco = ?, nombre = ?, numero = ?
+                WHERE id = ?
+                """,
+                (banco, nombre, numero, cuenta["id"]),
+            )
+            registrar_auditoria(
+                conexion,
+                "ACTUALIZAR",
+                "CUENTA_BANCARIA",
+                cuenta["id"],
+                f"{banco} - {nombre} - {numero or 'sin número'}",
+            )
+    except sqlite3.IntegrityError as e:
+        raise ErrorOperacion("⚠️ Esa cuenta bancaria ya está registrada.") from e
+    crear_respaldo_posterior()
+    return obtener_cuenta(cuenta["id"])
 
 def obtener_cuenta(cuenta_id=None):
     cuenta_id = 1 if cuenta_id is None else cuenta_id

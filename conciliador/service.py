@@ -10,6 +10,11 @@ class ConciliadorService:
     def crear_cuenta(self, banco, nombre, numero=""):
         return self.operations.crear_cuenta_bancaria(banco, nombre, numero)
 
+    def actualizar_cuenta(self, cuenta_id, banco, nombre, numero=""):
+        return self.operations.actualizar_cuenta_bancaria(
+            cuenta_id, banco, nombre, numero
+        )
+
     def emitir_cheque(self, *args, **kwargs):
         return self.operations.emitir_cheque_datos(*args, **kwargs)
 

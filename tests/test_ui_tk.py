@@ -107,6 +107,26 @@ def test_crear_cuenta_abre_un_unico_formulario():
     dialogo.assert_called_once_with(app, app._registrar_cuenta)
 
 
+def test_editar_cuenta_abre_formulario_con_datos_seleccionados():
+    cuenta = {
+        "id": 7,
+        "banco": "BANCO",
+        "nombre": "Operativa",
+        "numero": "001",
+    }
+    app = SimpleNamespace(
+        cuenta_id_actual=Mock(return_value=7),
+        cuentas=[cuenta],
+        _actualizar_cuenta=Mock(),
+    )
+
+    with patch.object(ui_tk, "DialogoNuevaCuenta") as dialogo:
+        ui_tk.ConciliadorApp.editar_cuenta(app)
+
+    dialogo.assert_called_once()
+    assert dialogo.call_args.kwargs["cuenta"] == cuenta
+
+
 def test_anular_cheque_cancelado_no_ejecuta_la_operacion():
     app = SimpleNamespace(
         anular_num=EntradaFalsa("42"),

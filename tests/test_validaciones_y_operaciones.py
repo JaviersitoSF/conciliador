@@ -97,6 +97,28 @@ def test_cuentas_tienen_formatos_de_impresion_independientes():
     assert main.obtener_formato_impresion(cuenta_b) == main.FORMATO_IMPRESION_DEFAULT
 
 
+def test_actualizar_cuenta_normaliza_datos_y_rechaza_duplicados():
+    cuenta_a = main.crear_cuenta_bancaria("BANCO A", "Operativa", "001")
+    main.crear_cuenta_bancaria("BANCO B", "Ahorros", "002")
+
+    actualizada = main.actualizar_cuenta_bancaria(
+        cuenta_a, " banco nuevo ", " Cuenta editada ", " 009 "
+    )
+
+    assert actualizada == {
+        "id": cuenta_a,
+        "banco": "BANCO NUEVO",
+        "nombre": "Cuenta editada",
+        "numero": "009",
+        "activa": 1,
+    }
+
+    with pytest.raises(main.ErrorOperacion, match="ya está registrada"):
+        main.actualizar_cuenta_bancaria(
+            cuenta_a, "BANCO B", "Ahorros", "002"
+        )
+
+
 def test_formato_rechaza_coordenadas_fuera_del_cheque():
     formato = dict(main.FORMATO_IMPRESION_DEFAULT, nombre_x=23)
 

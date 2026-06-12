@@ -24,6 +24,7 @@ from .printing import (
     validar_formato_impresion,
 )
 from .storage import (
+    actualizar_cuenta_bancaria,
     crear_cuenta_bancaria,
     crear_respaldo,
     crear_respaldo_posterior,

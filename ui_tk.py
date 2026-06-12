@@ -44,6 +44,9 @@ class ConciliadorApp(tk.Tk):
         ).pack(side="right")
         ttk.Button(encabezado, text="Nueva cuenta", command=self.crear_cuenta).pack(side="right", padx=8)
         ttk.Button(
+            encabezado, text="Editar cuenta", command=self.editar_cuenta
+        ).pack(side="right")
+        ttk.Button(
             encabezado,
             text="Formato de impresión",
             command=self.configurar_formato_impresion,
@@ -468,6 +471,23 @@ class ConciliadorApp(tk.Tk):
     def crear_cuenta(self):
         DialogoNuevaCuenta(self, self._registrar_cuenta)
 
+    def editar_cuenta(self):
+        try:
+            cuenta_id = self.cuenta_id_actual()
+            cuenta = next(
+                cuenta for cuenta in self.cuentas if cuenta["id"] == cuenta_id
+            )
+        except (Exception, StopIteration) as e:
+            messagebox.showerror("Editar cuenta", str(e))
+            return
+        DialogoNuevaCuenta(
+            self,
+            lambda banco, nombre, numero: self._actualizar_cuenta(
+                cuenta_id, banco, nombre, numero
+            ),
+            cuenta=cuenta,
+        )
+
     def _registrar_cuenta(self, banco, nombre, numero):
         try:
             cuenta_id = service.crear_cuenta(banco, nombre, numero)
@@ -483,6 +503,19 @@ class ConciliadorApp(tk.Tk):
         messagebox.showinfo(
             "Cuenta registrada",
             f"✅ Cuenta bancaria registrada con identificador {cuenta_id}.",
+        )
+        return True
+
+    def _actualizar_cuenta(self, cuenta_id, banco, nombre, numero):
+        try:
+            service.actualizar_cuenta(cuenta_id, banco, nombre, numero)
+        except Exception as e:
+            messagebox.showerror("No se pudo actualizar", str(e))
+            return False
+        self.refrescar_todo()
+        messagebox.showinfo(
+            "Cuenta actualizada",
+            "La información de la cuenta bancaria fue actualizada.",
         )
         return True
 
@@ -557,10 +590,10 @@ class ConciliadorApp(tk.Tk):
 
 
 class DialogoNuevaCuenta(tk.Toplevel):
-    def __init__(self, padre, al_guardar):
+    def __init__(self, padre, al_guardar, cuenta=None):
         super().__init__(padre)
         self.al_guardar = al_guardar
-        self.title("Nueva cuenta")
+        self.title("Editar cuenta" if cuenta else "Nueva cuenta")
         self.resizable(False, False)
         self.transient(padre)
         self.grab_set()
@@ -572,6 +605,10 @@ class DialogoNuevaCuenta(tk.Toplevel):
         self.banco = self._campo(contenido, "Nombre del banco", 0)
         self.nombre = self._campo(contenido, "Nombre interno", 1)
         self.numero = self._campo(contenido, "Número de cuenta (opcional)", 2)
+        if cuenta:
+            self.banco.insert(0, cuenta["banco"])
+            self.nombre.insert(0, cuenta["nombre"])
+            self.numero.insert(0, cuenta["numero"])
 
         acciones = ttk.Frame(contenido)
         acciones.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(16, 0))
@@ -579,7 +616,9 @@ class DialogoNuevaCuenta(tk.Toplevel):
             side="right"
         )
         self.boton_guardar = ttk.Button(
-            acciones, text="Guardar cuenta", command=self.guardar
+            acciones,
+            text="Guardar cambios" if cuenta else "Guardar cuenta",
+            command=self.guardar,
         )
         self.boton_guardar.pack(side="right", padx=8)
 
