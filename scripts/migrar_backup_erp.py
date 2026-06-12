@@ -5,6 +5,7 @@ import argparse
 import re
 import sqlite3
 import sys
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
@@ -111,16 +112,30 @@ def monto_dos_decimales(valor):
     return f"{monto:.2f}"
 
 
-def crear_esquema(conexion):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from conciliador import storage
+@dataclass(frozen=True)
+class RutasMigracion:
+    database: Path
 
-    storage.ARCHIVO_DATOS = str(
-        Path(conexion.execute("PRAGMA database_list").fetchone()[2])
-    )
-    conexion.close()
-    storage.inicializar_db()
-    return sqlite3.connect(storage.ARCHIVO_DATOS)
+    @property
+    def data_dir(self):
+        return self.database.parent
+
+    @property
+    def migration_backups(self):
+        return self.data_dir / "migration_backups"
+
+    def ensure_directories(self):
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.migration_backups.mkdir(parents=True, exist_ok=True)
+
+
+def crear_base_datos(destino):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from conciliador.database import Database
+
+    database = Database(RutasMigracion(destino))
+    database.initialize()
+    return database
 
 
 def migrar(origen, destino):
@@ -138,8 +153,8 @@ def migrar(origen, destino):
             cheques.extend(filas)
 
     destino.parent.mkdir(parents=True, exist_ok=True)
-    conexion_inicial = sqlite3.connect(destino)
-    conexion = crear_esquema(conexion_inicial)
+    database = crear_base_datos(destino)
+    conexion = database.connect()
     duplicados = 0
     invalidos = 0
 
