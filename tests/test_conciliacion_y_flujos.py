@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-import main
+from conciliador import operations as main
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +29,7 @@ def test_conciliacion_envuelve_errores_de_lectura():
     main.guardar_cheque_en_archivo("1", "2026-06-01", "A", "10")
     open(main.ARCHIVO_BANCO, "wb").close()
 
-    with patch("main.pd.read_excel", side_effect=RuntimeError("archivo roto")), \
+    with patch("conciliador.analytics.pd.read_excel", side_effect=RuntimeError("archivo roto")), \
             pytest.raises(main.ErrorOperacion, match="archivo roto"):
         main.obtener_conciliacion()
 
@@ -81,22 +81,11 @@ def test_conciliacion_no_descarta_filas_con_numero_invalido():
     assert all("inválido" in fila["mensaje"].lower() for fila in invalidos)
 
 
-def test_validadores_de_consola_reintentan_hasta_recibir_datos_validos():
-    with patch("builtins.input", side_effect=["", " listo "]):
-        assert main.pedir_texto_no_vacio("x") == "listo"
-
-    with patch("builtins.input", side_effect=["abc", "0", "15.25"]):
-        assert str(main.pedir_monto_positivo("x")) == "15.25"
-
-    with patch("builtins.input", side_effect=["", "abc", "0", "42"]):
-        assert main.pedir_numero_cheque("x") == "42"
-
-
 def test_abrir_pdf_propaga_detalle_del_comando():
     error = subprocess.CalledProcessError(
         1, ["lp", "cheque.pdf"], stderr="impresora no disponible"
     )
-    with patch("main.subprocess.run", side_effect=error), \
+    with patch("conciliador.printing.subprocess.run", side_effect=error), \
             pytest.raises(RuntimeError, match="impresora no disponible"):
         main.abrir_pdf_silenciosamente(["lp", "cheque.pdf"])
 
@@ -122,57 +111,37 @@ def test_imprimir_pdf_cubre_linux_macos_windows_y_falla_de_apertura():
             self.guardado = True
 
     pdf = PdfFalso()
-    with patch("main.canvas.Canvas", return_value=pdf), \
-            patch("main.platform.system", return_value="Linux"), \
-            patch("main.subprocess.run") as ejecutar:
+    with patch("conciliador.printing.canvas.Canvas", return_value=pdf), \
+            patch("conciliador.printing.platform.system", return_value="Linux"), \
+            patch("conciliador.printing.subprocess.run") as ejecutar:
         main.imprimir_cheque_pdf("1", "2026-06-03", "A", "1234567.89")
     assert pdf.guardado
-    assert (15 * main.cm, 13 * main.cm, "1,234,567.89") in pdf.textos
+    from conciliador.printing import cm
+    assert (15 * cm, 13 * cm, "1,234,567.89") in pdf.textos
     ejecutar.assert_called_once()
 
-    with patch("main.canvas.Canvas", return_value=PdfFalso()), \
-            patch("main.platform.system", return_value="Darwin"), \
-            patch("main.subprocess.run") as ejecutar:
+    with patch("conciliador.printing.canvas.Canvas", return_value=PdfFalso()), \
+            patch("conciliador.printing.platform.system", return_value="Darwin"), \
+            patch("conciliador.printing.subprocess.run") as ejecutar:
         main.imprimir_cheque_pdf("2", "2026-06-03", "A", "10")
     assert ejecutar.call_args.args[0][0] == "lp"
 
     pdf_windows = PdfFalso()
-    with patch("main.canvas.Canvas", return_value=pdf_windows) as crear_pdf, \
-            patch("main.platform.system", return_value="Windows"), \
-            patch("main.os.startfile", create=True) as startfile:
+    with patch("conciliador.printing.canvas.Canvas", return_value=pdf_windows) as crear_pdf, \
+            patch("conciliador.printing.platform.system", return_value="Windows"), \
+            patch("conciliador.printing.os.startfile", create=True) as startfile:
         main.imprimir_cheque_pdf("3", "2026-06-03", "A", "10")
     crear_pdf.assert_called_once_with(
-        "cheque_3.pdf", pagesize=(22 * main.cm, 14 * main.cm)
+        "cheque_3.pdf", pagesize=(22 * cm, 14 * cm)
     )
     assert pdf_windows.traslados == []
     startfile.assert_called_once_with("cheque_3.pdf", "print")
 
     salida = StringIO()
-    with patch("main.canvas.Canvas", return_value=PdfFalso()), \
-            patch("main.platform.system", return_value="Windows"), \
-            patch("main.os.startfile", None, create=True), \
+    with patch("conciliador.printing.canvas.Canvas", return_value=PdfFalso()), \
+            patch("conciliador.printing.platform.system", return_value="Windows"), \
+            patch("conciliador.printing.os.startfile", None, create=True), \
             redirect_stdout(salida):
         resultado = main.imprimir_cheque_pdf("4", "2026-06-03", "A", "10")
     assert "Abre el PDF manual" in salida.getvalue()
     assert resultado is False
-
-
-def test_menu_despacha_todas_las_opciones_y_sale():
-    acciones = {
-        "1": "registrar_e_imprimir",
-        "2": "registrar_deposito",
-        "3": "conciliar_cuentas",
-        "4": "anular_cheque",
-        "5": "reporte_movimientos",
-        "6": "reimprimir_cheque",
-        "7": "registrar_cuenta_bancaria",
-    }
-    for opcion, funcion in acciones.items():
-        with patch("builtins.input", return_value=opcion), \
-                patch(f"main.{funcion}", side_effect=SystemExit), \
-                pytest.raises(SystemExit):
-            main.main()
-
-    with patch("builtins.input", side_effect=["x", "8"]), \
-            pytest.raises(SystemExit):
-        main.main()

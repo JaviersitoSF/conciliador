@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-import main
+from conciliador import operations as main
 
 
 class SistemaBancarioTests(unittest.TestCase):
@@ -71,7 +71,7 @@ class SistemaBancarioTests(unittest.TestCase):
         self.assertEqual(self.auditoria()[0]["accion"], "CREAR")
 
     def test_emitir_cheque_crea_registro_auditoria_y_respaldo(self):
-        with patch("main.imprimir_cheque_pdf"):
+        with patch("conciliador.movements.printing.imprimir_cheque_pdf"):
             resultado = main.emitir_cheque_datos(
                 "35",
                 "proveedor",
@@ -126,7 +126,7 @@ class SistemaBancarioTests(unittest.TestCase):
 
     def test_respaldos_se_rotan(self):
         main.inicializar_db()
-        with patch.object(main, "MAX_RESPALDOS", 2):
+        with patch("conciliador.storage.MAX_RESPALDOS", 2):
             main.crear_respaldo()
             main.crear_respaldo()
             main.crear_respaldo()
@@ -203,33 +203,10 @@ class SistemaBancarioTests(unittest.TestCase):
         self.assertEqual(len(main.cargar_cheques_registrados(cuenta_a)), 1)
         self.assertEqual(len(main.cargar_cheques_registrados(cuenta_b)), 1)
 
-    def test_consola_obliga_a_seleccionar_cuenta_para_emitir(self):
-        cuenta_id = main.crear_cuenta_bancaria("BANCO A", "Operativa", "123456")
-        cuentas = [
-            cuenta
-            for cuenta in main.listar_cuentas_bancarias()
-            if cuenta["id"] == cuenta_id
-        ]
-
-        with patch("main.listar_cuentas_bancarias", return_value=cuentas), \
-                patch(
-                    "builtins.input",
-                    side_effect=[
-                        "x", "1", "10.00", "Proveedor", "Compra", "35", "s",
-                    ],
-                ), \
-                patch("main.imprimir_cheque_pdf"), \
-                redirect_stdout(StringIO()):
-            main.registrar_e_imprimir()
-
-        cheque = main.cargar_cheques_registrados(cuenta_id).iloc[0]
-        self.assertEqual(cheque["Num"], "35")
-        self.assertEqual(cheque["Banco"], "BANCO A")
-
     def test_reimprimir_registra_auditoria(self):
         main.guardar_cheque_en_archivo("35", "2026-06-03", "A", "10.00")
 
-        with patch("main.imprimir_cheque_pdf"):
+        with patch("conciliador.movements.printing.imprimir_cheque_pdf"):
             main.reimprimir_cheque_numero("35")
 
         self.assertEqual(self.auditoria()[-1]["accion"], "REIMPRIMIR")

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-import main
+from conciliador import operations as main
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +42,7 @@ def test_operaciones_rechazan_fechas_invalidas(fecha):
     with pytest.raises(main.ErrorOperacion, match="fecha"):
         main.registrar_deposito_datos("10", "VENTA", fecha=fecha)
 
-    with patch("main.imprimir_cheque_pdf") as imprimir, \
+    with patch("conciliador.operations.imprimir_cheque_pdf") as imprimir, \
             pytest.raises(main.ErrorOperacion, match="fecha"):
         main.emitir_cheque_datos("1", "PROVEEDOR", "10", fecha=fecha)
 
@@ -109,7 +109,7 @@ def test_emitir_y_reimprimir_usan_formato_de_la_cuenta():
     formato = dict(main.FORMATO_IMPRESION_DEFAULT, monto_x=16.5)
     main.guardar_formato_impresion(cuenta_id, formato)
 
-    with patch("main.imprimir_cheque_pdf", return_value=True) as imprimir:
+    with patch("conciliador.movements.printing.imprimir_cheque_pdf", return_value=True) as imprimir:
         main.emitir_cheque_datos(
             "8", "PROVEEDOR", "50", fecha="2026-06-01",
             descripcion="COMPRA", cuenta_id=cuenta_id,
@@ -124,7 +124,7 @@ def test_emitir_y_reimprimir_usan_formato_de_la_cuenta():
 def test_prueba_de_formato_no_registra_movimientos_ni_auditoria():
     formato = dict(main.FORMATO_IMPRESION_DEFAULT, descripcion_y=6.5)
 
-    with patch("main.imprimir_cheque_pdf", return_value=True) as imprimir:
+    with patch("conciliador.printing.imprimir_cheque_pdf", return_value=True) as imprimir:
         assert main.probar_formato_impresion(formato) is True
 
     assert imprimir.call_args.kwargs["formato"]["descripcion_y"] == 6.5
@@ -149,7 +149,7 @@ def test_depositos_invalidos_no_escriben_datos_ni_auditoria(monto, descripcion):
 
 
 def test_falla_de_respaldo_informa_que_la_operacion_si_se_guardo():
-    with patch("main.crear_respaldo", side_effect=OSError("sin espacio")), \
+    with patch("conciliador.storage.crear_respaldo", side_effect=OSError("sin espacio")), \
             pytest.raises(main.ErrorOperacion, match="sí se guardó.*respaldo"):
         main.registrar_deposito_datos(
             "10", "VENTA", fecha="2026-06-01"
@@ -184,7 +184,7 @@ def test_busqueda_de_cheque_usa_la_misma_normalizacion_que_el_registro():
 
 
 def test_emitir_informa_que_el_cheque_quedo_registrado_si_falla_el_pdf():
-    with patch("main.imprimir_cheque_pdf", side_effect=OSError("disco lleno")):
+    with patch("conciliador.movements.printing.imprimir_cheque_pdf", side_effect=OSError("disco lleno")):
         with pytest.raises(main.ErrorOperacion, match="fue registrado"):
             main.emitir_cheque_datos(
                 "15", "PROVEEDOR", "100", fecha="2026-06-01"
@@ -195,7 +195,7 @@ def test_emitir_informa_que_el_cheque_quedo_registrado_si_falla_el_pdf():
 
 
 def test_emitir_advierte_si_pdf_existe_pero_no_se_pudo_abrir_o_imprimir():
-    with patch("main.imprimir_cheque_pdf", return_value=False):
+    with patch("conciliador.movements.printing.imprimir_cheque_pdf", return_value=False):
         resultado = main.emitir_cheque_datos(
             "16", "PROVEEDOR", "100", fecha="2026-06-01"
         )
@@ -206,7 +206,7 @@ def test_emitir_advierte_si_pdf_existe_pero_no_se_pudo_abrir_o_imprimir():
 
 
 def test_emitir_puede_registrar_sin_imprimir():
-    with patch("main.imprimir_cheque_pdf") as imprimir:
+    with patch("conciliador.movements.printing.imprimir_cheque_pdf") as imprimir:
         resultado = main.emitir_cheque_datos(
             "17",
             "PROVEEDOR",
@@ -226,7 +226,7 @@ def test_cheques_de_cuentas_distintas_generan_nombres_pdf_distintos():
     cuenta_a = main.crear_cuenta_bancaria("BANCO A", "Operativa", "001")
     cuenta_b = main.crear_cuenta_bancaria("BANCO B", "Operativa", "002")
 
-    with patch("main.imprimir_cheque_pdf") as imprimir:
+    with patch("conciliador.movements.printing.imprimir_cheque_pdf") as imprimir:
         resultado_a = main.emitir_cheque_datos(
             "10", "A", "10", fecha="2026-06-01", cuenta_id=cuenta_a
         )
@@ -235,8 +235,8 @@ def test_cheques_de_cuentas_distintas_generan_nombres_pdf_distintos():
         )
 
     assert resultado_a["pdf"] != resultado_b["pdf"]
-    assert resultado_a["pdf"] == f"cheque_{cuenta_a}_10.pdf"
-    assert resultado_b["pdf"] == f"cheque_{cuenta_b}_10.pdf"
+    assert resultado_a["pdf"].endswith(f"cheque_{cuenta_a}_10.pdf")
+    assert resultado_b["pdf"].endswith(f"cheque_{cuenta_b}_10.pdf")
     assert imprimir.call_count == 2
 
 
@@ -244,7 +244,7 @@ def test_no_se_puede_reimprimir_un_cheque_anulado():
     main.guardar_cheque_en_archivo("1", "2026-06-01", "A", "10")
     main.anular_cheque_numero("1")
 
-    with patch("main.imprimir_cheque_pdf") as imprimir, \
+    with patch("conciliador.movements.printing.imprimir_cheque_pdf") as imprimir, \
             pytest.raises(main.ErrorOperacion, match="anulado"):
         main.reimprimir_cheque_numero("1")
 

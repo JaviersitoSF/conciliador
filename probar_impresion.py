@@ -3,7 +3,7 @@
 from datetime import date
 from decimal import Decimal
 
-from main import imprimir_cheque_pdf
+from conciliador.printing import imprimir_cheque_pdf
 
 
 DATOS_CHEQUE_PRUEBA = {
