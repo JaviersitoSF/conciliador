@@ -113,12 +113,14 @@ def monto_dos_decimales(valor):
 
 def crear_esquema(conexion):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    import main
+    from conciliador import storage
 
-    main.ARCHIVO_DATOS = str(Path(conexion.execute("PRAGMA database_list").fetchone()[2]))
+    storage.ARCHIVO_DATOS = str(
+        Path(conexion.execute("PRAGMA database_list").fetchone()[2])
+    )
     conexion.close()
-    main.inicializar_db()
-    return sqlite3.connect(main.ARCHIVO_DATOS)
+    storage.inicializar_db()
+    return sqlite3.connect(storage.ARCHIVO_DATOS)
 
 
 def migrar(origen, destino):

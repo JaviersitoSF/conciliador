@@ -24,14 +24,14 @@ def configure_logging(paths):
     return logger
 
 
-def prepare_application(core, base_dir=None):
+def prepare_application(base_dir=None):
+    from . import storage
+
     paths = AppPaths.portable(base_dir)
     logger = configure_logging(paths)
     logger.info("Iniciando Conciliador")
-    core.ARCHIVO_DATOS = str(paths.database)
-    core.DIRECTORIO_RESPALDOS = str(paths.data_dir / "operation_backups")
+    storage.configure_paths(paths)
     database = Database(paths, logger)
     version = database.initialize()
-    # La fachada existente garantiza que la cuenta inicial y su formato existan.
-    core.inicializar_db()
+    storage.inicializar_db()
     return paths, logger, version

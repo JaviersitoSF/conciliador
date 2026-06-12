@@ -16,7 +16,7 @@ addopts = "-ra"
 
 [tool.coverage.run]
 branch = true
-source = ["conciliador", "main.py", "ui_tk.py"]
+source = ["conciliador", "ui_tk.py"]
 
 [tool.coverage.report]
 show_missing = true

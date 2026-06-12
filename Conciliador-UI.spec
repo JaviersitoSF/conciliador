@@ -8,7 +8,7 @@ datas = collect_data_files("num2words")
 
 
 a = Analysis(
-    ["ui_tk.py"],
+    ["main.py"],
     pathex=[],
     binaries=[],
     datas=datas,

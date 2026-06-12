@@ -5,6 +5,11 @@
 El proyecto incluye una acción de GitHub que crea `Conciliador-UI.exe`, la
 única interfaz soportada.
 
+`main.py` es solamente el punto de entrada gráfico. La interfaz vive en
+`ui_tk.py` y los casos de uso se consumen mediante `conciliador.service`.
+El paquete separa persistencia (`storage`), movimientos (`movements`),
+conciliación y reportes (`analytics`) e impresión (`printing`).
+
 1. Sube el repositorio a GitHub.
 2. Abre la pestaña **Actions**.
 3. Selecciona **Construir ejecutable de Windows**.

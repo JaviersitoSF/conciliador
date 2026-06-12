@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-import main as core
+from conciliador import operations as core
 from conciliador.runtime import prepare_application
 from conciliador.service import ConciliadorService
 
@@ -507,7 +507,7 @@ class DialogoFormatoImpresion(tk.Toplevel):
 
 def main(base_dir=None):
     try:
-        paths, logger, _version = prepare_application(core, base_dir)
+        paths, logger, _version = prepare_application(base_dir)
     except Exception as e:
         messagebox.showerror(
             "Conciliador no pudo iniciar",
