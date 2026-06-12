@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from conciliador import operations as core
 from conciliador.runtime import prepare_application
@@ -17,7 +17,9 @@ class ConciliadorApp(tk.Tk):
 
         self._configurar_estilo()
         self._crear_layout()
+        self.bind_all("<Control-r>", lambda _evento: self.refrescar_todo())
         self.refrescar_todo()
+        self.cheque_num.focus_set()
 
     def _configurar_estilo(self):
         self.configure(bg="#f6f7f9")
@@ -37,7 +39,9 @@ class ConciliadorApp(tk.Tk):
         encabezado = ttk.Frame(self, padding=(18, 14, 18, 8))
         encabezado.pack(fill="x")
         ttk.Label(encabezado, text="Sistema de Control Bancario", style="Title.TLabel").pack(side="left")
-        ttk.Button(encabezado, text="Actualizar", command=self.refrescar_todo).pack(side="right")
+        ttk.Button(
+            encabezado, text="Actualizar", command=self.refrescar_todo
+        ).pack(side="right")
         ttk.Button(encabezado, text="Nueva cuenta", command=self.crear_cuenta).pack(side="right", padx=8)
         ttk.Button(
             encabezado,
@@ -92,10 +96,21 @@ class ConciliadorApp(tk.Tk):
         self.boton_emitir_cheque.grid(
             row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0)
         )
+        self.cheque_monto.bind("<Return>", lambda _evento: self.emitir_cheque())
 
         self.deposito_desc = self._campo(deposito, "Descripción", 0)
         self.deposito_monto = self._campo(deposito, "Monto", 1)
-        ttk.Button(deposito, text="Registrar depósito", command=self.registrar_deposito).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        self.boton_registrar_deposito = ttk.Button(
+            deposito,
+            text="Registrar depósito",
+            command=self.registrar_deposito,
+        )
+        self.boton_registrar_deposito.grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        )
+        self.deposito_monto.bind(
+            "<Return>", lambda _evento: self.registrar_deposito()
+        )
 
         acciones_cheque = ttk.Frame(contenedor)
         acciones_cheque.grid(row=1, column=0, sticky="new", padx=(0, 8))
@@ -104,18 +119,30 @@ class ConciliadorApp(tk.Tk):
         anular = ttk.LabelFrame(acciones_cheque, text="Anular cheque", padding=14)
         anular.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.anular_num = self._campo(anular, "Número de cheque", 0)
-        ttk.Button(anular, text="Marcar como anulado", command=self.anular_cheque).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        self.boton_anular_cheque = ttk.Button(
+            anular, text="Marcar como anulado", command=self.anular_cheque
+        )
+        self.boton_anular_cheque.grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        )
+        self.anular_num.bind("<Return>", lambda _evento: self.anular_cheque())
 
         reimprimir = ttk.LabelFrame(
             acciones_cheque, text="Volver a imprimir un cheque", padding=14
         )
         reimprimir.grid(row=1, column=0, sticky="ew")
         self.reimprimir_num = self._campo(reimprimir, "Número de cheque", 0)
-        ttk.Button(
+        self.boton_reimprimir_cheque = ttk.Button(
             reimprimir,
             text="Generar e imprimir otra copia",
             command=self.reimprimir_cheque,
-        ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        )
+        self.boton_reimprimir_cheque.grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        )
+        self.reimprimir_num.bind(
+            "<Return>", lambda _evento: self.reimprimir_cheque()
+        )
 
         historial = ttk.LabelFrame(contenedor, text="Cheques recientes", padding=10)
         historial.grid(row=1, column=1, sticky="nsew", padx=(8, 0))
@@ -154,7 +181,12 @@ class ConciliadorApp(tk.Tk):
     def _crear_conciliacion(self):
         acciones = ttk.Frame(self.tab_conciliacion)
         acciones.pack(fill="x", pady=(0, 12))
-        ttk.Button(acciones, text="Seleccionar estado y conciliar", command=self.conciliar).pack(side="left")
+        self.boton_conciliar = ttk.Button(
+            acciones,
+            text="Seleccionar estado y conciliar",
+            command=self.conciliar,
+        )
+        self.boton_conciliar.pack(side="left")
 
         panel = ttk.Frame(self.tab_conciliacion)
         panel.pack(fill="both", expand=True)
@@ -183,14 +215,76 @@ class ConciliadorApp(tk.Tk):
     def _tabla(self, padre, columnas):
         tabla = ttk.Treeview(padre, columns=columnas, show="headings")
         barra = ttk.Scrollbar(padre, orient="vertical", command=tabla.yview)
-        tabla.configure(yscrollcommand=barra.set)
+        barra_horizontal = ttk.Scrollbar(
+            padre, orient="horizontal", command=tabla.xview
+        )
+        tabla.configure(
+            yscrollcommand=barra.set,
+            xscrollcommand=barra_horizontal.set,
+        )
         tabla.grid(row=0, column=0, sticky="nsew")
         barra.grid(row=0, column=1, sticky="ns")
+        barra_horizontal.grid(row=1, column=0, sticky="ew")
+        tabla._orden_descendente = {}
         for columna in columnas:
-            tabla.heading(columna, text=columna)
+            tabla.heading(
+                columna,
+                text=columna,
+                command=lambda c=columna, t=tabla: self._ordenar_tabla(t, c),
+            )
             ancho = 260 if columna in {"Nombre", "Mensaje", "Descripcion"} else 110
             tabla.column(columna, width=ancho, minwidth=80, anchor="w")
+        tabla.bind("<Control-c>", lambda _evento, t=tabla: self._copiar_tabla(t))
+        tabla.bind("<Control-C>", lambda _evento, t=tabla: self._copiar_tabla(t))
         return tabla
+
+    def _ordenar_tabla(self, tabla, columna):
+        filas = [
+            (tabla.set(item, columna), item)
+            for item in tabla.get_children()
+            if "vacio" not in tabla.item(item, "tags")
+        ]
+        descendente = tabla._orden_descendente.get(columna, False)
+
+        def clave(fila):
+            valor = fila[0].replace(",", "").replace("Q", "").strip()
+            try:
+                return 0, float(valor)
+            except ValueError:
+                return 1, valor.casefold()
+
+        filas.sort(key=clave, reverse=descendente)
+        for posicion, (_, item) in enumerate(filas):
+            tabla.move(item, "", posicion)
+        tabla._orden_descendente[columna] = not descendente
+
+    def _copiar_tabla(self, tabla):
+        seleccion = tabla.selection()
+        if not seleccion:
+            return "break"
+        lineas = []
+        for item in seleccion:
+            if "vacio" not in tabla.item(item, "tags"):
+                lineas.append("\t".join(map(str, tabla.item(item, "values"))))
+        if lineas:
+            self.clipboard_clear()
+            self.clipboard_append("\n".join(lineas))
+        return "break"
+
+    def _mostrar_estado_vacio(self, tabla, mensaje="Sin registros"):
+        if not tabla.get_children():
+            valores = [mensaje] + [""] * (len(tabla["columns"]) - 1)
+            tabla.insert("", tk.END, values=valores, tags=("vacio",))
+
+    def _ejecutar_bloqueado(self, boton, accion):
+        if str(boton.cget("state")) == "disabled":
+            return None
+        boton.configure(state="disabled")
+        self.update_idletasks()
+        try:
+            return accion()
+        finally:
+            boton.configure(state="normal")
 
     def _actualizar_boton_cheque(self):
         texto = (
@@ -201,6 +295,11 @@ class ConciliadorApp(tk.Tk):
         self.boton_emitir_cheque.configure(text=texto)
 
     def emitir_cheque(self):
+        return self._ejecutar_bloqueado(
+            self.boton_emitir_cheque, self._emitir_cheque
+        )
+
+    def _emitir_cheque(self):
         descripcion = self.cheque_descripcion.get().strip()
         if not descripcion:
             messagebox.showerror(
@@ -228,6 +327,11 @@ class ConciliadorApp(tk.Tk):
         messagebox.showinfo("Cheque emitido", resultado["mensaje"])
 
     def registrar_deposito(self):
+        return self._ejecutar_bloqueado(
+            self.boton_registrar_deposito, self._registrar_deposito
+        )
+
+    def _registrar_deposito(self):
         try:
             resultado = service.registrar_deposito(
                 self.deposito_monto.get(),
@@ -243,6 +347,29 @@ class ConciliadorApp(tk.Tk):
         messagebox.showinfo("Depósito registrado", resultado["mensaje"])
 
     def anular_cheque(self):
+        numero = self.anular_num.get().strip()
+        if not numero:
+            messagebox.showerror(
+                "No se pudo anular",
+                "Ingrese el número de cheque que desea anular.",
+                parent=self,
+            )
+            self.anular_num.focus_set()
+            return
+        confirmar = messagebox.askyesno(
+            "Confirmar anulación",
+            f"¿Desea marcar como anulado el cheque {numero}?\n\n"
+            "Esta acción cambia su estado en el registro.",
+            icon="warning",
+            parent=self,
+        )
+        if not confirmar:
+            return
+        return self._ejecutar_bloqueado(
+            self.boton_anular_cheque, self._anular_cheque
+        )
+
+    def _anular_cheque(self):
         try:
             resultado = service.anular_cheque(
                 self.anular_num.get(), self.cuenta_id_actual()
@@ -255,6 +382,11 @@ class ConciliadorApp(tk.Tk):
         messagebox.showinfo("Cheque anulado", resultado["mensaje"])
 
     def reimprimir_cheque(self):
+        return self._ejecutar_bloqueado(
+            self.boton_reimprimir_cheque, self._reimprimir_cheque
+        )
+
+    def _reimprimir_cheque(self):
         try:
             mensaje = service.reimprimir_cheque(
                 self.reimprimir_num.get(), self.cuenta_id_actual()
@@ -266,14 +398,19 @@ class ConciliadorApp(tk.Tk):
         messagebox.showinfo("Cheque listo", mensaje)
 
     def conciliar(self):
-        self._limpiar_tabla(self.tabla_conciliacion)
-        self._limpiar_tabla(self.tabla_no_registrados)
         archivo = filedialog.askopenfilename(
             title="Seleccionar estado de cuenta",
             filetypes=[("Archivos Excel", "*.xlsx *.xls")],
         )
         if not archivo:
             return
+        return self._ejecutar_bloqueado(
+            self.boton_conciliar, lambda: self._conciliar_archivo(archivo)
+        )
+
+    def _conciliar_archivo(self, archivo):
+        self._limpiar_tabla(self.tabla_conciliacion)
+        self._limpiar_tabla(self.tabla_no_registrados)
         try:
             resultado = service.conciliar(
                 self.cuenta_id_actual(), archivo
@@ -286,6 +423,12 @@ class ConciliadorApp(tk.Tk):
         for fila in resultado["no_registrados"]:
             monto = core.formatear_monto(fila["monto"]) if fila["monto"] is not None else "N/D"
             self.tabla_no_registrados.insert("", tk.END, values=(fila["num"], monto, fila["mensaje"]))
+        self._mostrar_estado_vacio(
+            self.tabla_conciliacion, "No se encontraron cheques"
+        )
+        self._mostrar_estado_vacio(
+            self.tabla_no_registrados, "No se encontraron cargos"
+        )
 
     def refrescar_todo(self):
         self._cargar_selector_cuentas()
@@ -323,24 +466,14 @@ class ConciliadorApp(tk.Tk):
         return None
 
     def crear_cuenta(self):
-        banco = simpledialog.askstring("Nueva cuenta", "Nombre del banco:", parent=self)
-        if banco is None:
-            return
-        nombre = simpledialog.askstring(
-            "Nueva cuenta", "Nombre interno de la cuenta:", parent=self
-        )
-        if nombre is None:
-            return
-        numero = simpledialog.askstring(
-            "Nueva cuenta", "Número de cuenta (opcional):", parent=self
-        )
-        if numero is None:
-            return
+        DialogoNuevaCuenta(self, self._registrar_cuenta)
+
+    def _registrar_cuenta(self, banco, nombre, numero):
         try:
             cuenta_id = service.crear_cuenta(banco, nombre, numero)
         except Exception as e:
             messagebox.showerror("No se pudo crear", str(e))
-            return
+            return False
         self._cargar_selector_cuentas()
         for indice, cuenta in enumerate(self.cuentas):
             if cuenta["id"] == cuenta_id:
@@ -351,6 +484,7 @@ class ConciliadorApp(tk.Tk):
             "Cuenta registrada",
             f"✅ Cuenta bancaria registrada con identificador {cuenta_id}.",
         )
+        return True
 
     def configurar_formato_impresion(self):
         try:
@@ -365,6 +499,9 @@ class ConciliadorApp(tk.Tk):
         self._limpiar_tabla(self.tabla_cheques)
         df = service.obtener_cheques(self.cuenta_id_actual())
         if df.empty:
+            self._mostrar_estado_vacio(
+                self.tabla_cheques, "No hay cheques registrados"
+            )
             return
         for _, fila in df.tail(30).iloc[::-1].iterrows():
             self.tabla_cheques.insert(
@@ -372,6 +509,7 @@ class ConciliadorApp(tk.Tk):
                 tk.END,
                 values=(fila["Num"], fila["Fecha"], fila["Nombre"], fila["Monto"], fila["Estado"]),
             )
+        self._mostrar_estado_vacio(self.tabla_cheques, "No hay cheques registrados")
 
     def _cargar_reporte(self):
         reporte = service.obtener_reporte(
@@ -396,6 +534,12 @@ class ConciliadorApp(tk.Tk):
                 tk.END,
                 values=(fila["Fecha"], fila["Descripcion"], fila["Monto"]),
             )
+        self._mostrar_estado_vacio(
+            self.tabla_reporte_cheques, "No hay cheques en el período"
+        )
+        self._mostrar_estado_vacio(
+            self.tabla_reporte_depositos, "No hay depósitos en el período"
+        )
 
     def _limpiar_tabla(self, tabla):
         for item in tabla.get_children():
@@ -404,6 +548,85 @@ class ConciliadorApp(tk.Tk):
     def _limpiar_conciliacion(self):
         self._limpiar_tabla(self.tabla_conciliacion)
         self._limpiar_tabla(self.tabla_no_registrados)
+        self._mostrar_estado_vacio(
+            self.tabla_conciliacion, "Seleccione un estado de cuenta"
+        )
+        self._mostrar_estado_vacio(
+            self.tabla_no_registrados, "Seleccione un estado de cuenta"
+        )
+
+
+class DialogoNuevaCuenta(tk.Toplevel):
+    def __init__(self, padre, al_guardar):
+        super().__init__(padre)
+        self.al_guardar = al_guardar
+        self.title("Nueva cuenta")
+        self.resizable(False, False)
+        self.transient(padre)
+        self.grab_set()
+
+        contenido = ttk.Frame(self, padding=18)
+        contenido.pack(fill="both", expand=True)
+        contenido.columnconfigure(1, weight=1)
+
+        self.banco = self._campo(contenido, "Nombre del banco", 0)
+        self.nombre = self._campo(contenido, "Nombre interno", 1)
+        self.numero = self._campo(contenido, "Número de cuenta (opcional)", 2)
+
+        acciones = ttk.Frame(contenido)
+        acciones.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(16, 0))
+        ttk.Button(acciones, text="Cancelar", command=self.destroy).pack(
+            side="right"
+        )
+        self.boton_guardar = ttk.Button(
+            acciones, text="Guardar cuenta", command=self.guardar
+        )
+        self.boton_guardar.pack(side="right", padx=8)
+
+        self.bind("<Escape>", lambda _evento: self.destroy())
+        self.bind("<Return>", lambda _evento: self.guardar())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.banco.focus_set()
+
+    def _campo(self, padre, etiqueta, fila):
+        ttk.Label(padre, text=etiqueta).grid(
+            row=fila, column=0, sticky="w", padx=(0, 12), pady=6
+        )
+        entrada = ttk.Entry(padre, width=36)
+        entrada.grid(row=fila, column=1, sticky="ew", pady=6)
+        return entrada
+
+    def guardar(self):
+        if str(self.boton_guardar.cget("state")) == "disabled":
+            return
+        banco = self.banco.get().strip()
+        nombre = self.nombre.get().strip()
+        if not banco:
+            messagebox.showerror(
+                "Datos incompletos",
+                "Ingrese el nombre del banco.",
+                parent=self,
+            )
+            self.banco.focus_set()
+            return
+        if not nombre:
+            messagebox.showerror(
+                "Datos incompletos",
+                "Ingrese el nombre interno de la cuenta.",
+                parent=self,
+            )
+            self.nombre.focus_set()
+            return
+
+        self.boton_guardar.configure(state="disabled")
+        self.update_idletasks()
+        try:
+            guardada = self.al_guardar(banco, nombre, self.numero.get().strip())
+        finally:
+            if self.winfo_exists():
+                self.boton_guardar.configure(state="normal")
+        if guardada:
+            self.destroy()
 
 
 class DialogoFormatoImpresion(tk.Toplevel):
@@ -456,14 +679,19 @@ class DialogoFormatoImpresion(tk.Toplevel):
         ttk.Button(
             acciones, text="Restaurar defaults", command=self.restaurar_defaults
         ).pack(side="left")
-        ttk.Button(
+        self.boton_probar = ttk.Button(
             acciones, text="Probar impresión", command=self.probar_impresion
-        ).pack(side="left", padx=8)
-        ttk.Button(acciones, text="Cancelar", command=self.destroy).pack(side="right")
-        ttk.Button(acciones, text="Guardar", command=self.guardar).pack(
-            side="right", padx=8
         )
+        self.boton_probar.pack(side="left", padx=8)
+        ttk.Button(acciones, text="Cancelar", command=self.destroy).pack(side="right")
+        self.boton_guardar = ttk.Button(
+            acciones, text="Guardar", command=self.guardar
+        )
+        self.boton_guardar.pack(side="right", padx=8)
         self._cargar(formato)
+        self.bind("<Escape>", lambda _evento: self.destroy())
+        self.bind("<Control-s>", lambda _evento: self.guardar())
+        self.entradas["ancho"].focus_set()
 
     def _cargar(self, formato):
         for campo, entrada in self.entradas.items():
@@ -480,11 +708,17 @@ class DialogoFormatoImpresion(tk.Toplevel):
         self._cargar(core.FORMATO_IMPRESION_DEFAULT)
 
     def probar_impresion(self):
+        if str(self.boton_probar.cget("state")) == "disabled":
+            return
+        self.boton_probar.configure(state="disabled")
+        self.update_idletasks()
         try:
             enviada = core.probar_formato_impresion(self._valores())
         except Exception as e:
             messagebox.showerror("Prueba de impresión", str(e), parent=self)
             return
+        finally:
+            self.boton_probar.configure(state="normal")
         if enviada:
             mensaje = "La prueba fue enviada a impresión."
         else:
@@ -492,11 +726,18 @@ class DialogoFormatoImpresion(tk.Toplevel):
         messagebox.showinfo("Prueba de impresión", mensaje, parent=self)
 
     def guardar(self):
+        if str(self.boton_guardar.cget("state")) == "disabled":
+            return
+        self.boton_guardar.configure(state="disabled")
+        self.update_idletasks()
         try:
             service.guardar_formato(self.cuenta_id, self._valores())
         except Exception as e:
             messagebox.showerror("Formato de impresión", str(e), parent=self)
             return
+        finally:
+            if self.winfo_exists():
+                self.boton_guardar.configure(state="normal")
         messagebox.showinfo(
             "Formato de impresión",
             "Formato guardado para la cuenta seleccionada.",

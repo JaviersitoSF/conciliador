@@ -32,3 +32,5 @@ respaldos/
 estado_cuenta.xlsx
 cheque_*.pdf
 cheque_media_carta.pdf
+/data
+/logs

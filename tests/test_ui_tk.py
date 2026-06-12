@@ -43,11 +43,11 @@ def test_emitir_cheque_incluye_descripcion_y_opcion_de_impresion():
     )
 
     with patch.object(
-        ui_tk.core,
-        "emitir_cheque_datos",
+        ui_tk.service,
+        "emitir_cheque",
         return_value={"mensaje": "Cheque registrado"},
     ) as emitir, patch.object(ui_tk.messagebox, "showinfo") as informar:
-        ui_tk.ConciliadorApp.emitir_cheque(app)
+        ui_tk.ConciliadorApp._emitir_cheque(app)
 
     emitir.assert_called_once_with(
         "12",
@@ -68,9 +68,9 @@ def test_emitir_cheque_rechaza_descripcion_vacia_como_la_tui():
     )
 
     with patch.object(
-        ui_tk.core, "emitir_cheque_datos"
+        ui_tk.service, "emitir_cheque"
     ) as emitir, patch.object(ui_tk.messagebox, "showerror") as informar:
-        ui_tk.ConciliadorApp.emitir_cheque(app)
+        ui_tk.ConciliadorApp._emitir_cheque(app)
 
     emitir.assert_not_called()
     informar.assert_called_once_with(
@@ -87,28 +87,37 @@ def test_reimprimir_cheque_usa_la_cuenta_seleccionada():
     )
 
     with patch.object(
-        ui_tk.core,
-        "reimprimir_cheque_numero",
+        ui_tk.service,
+        "reimprimir_cheque",
         return_value="Cheque listo para imprimir",
     ) as reimprimir, patch.object(ui_tk.messagebox, "showinfo") as informar:
-        ui_tk.ConciliadorApp.reimprimir_cheque(app)
+        ui_tk.ConciliadorApp._reimprimir_cheque(app)
 
     reimprimir.assert_called_once_with("35", 4)
     assert numero.eliminada
     informar.assert_called_once_with("Cheque listo", "Cheque listo para imprimir")
 
 
-def test_cancelar_numero_opcional_cancela_creacion_de_cuenta():
-    app = SimpleNamespace()
+def test_crear_cuenta_abre_un_unico_formulario():
+    app = SimpleNamespace(_registrar_cuenta=Mock())
 
-    with patch.object(
-        ui_tk.simpledialog,
-        "askstring",
-        side_effect=["Banco", "Cuenta operativa", None],
-    ), patch.object(ui_tk.core, "crear_cuenta_bancaria") as crear:
+    with patch.object(ui_tk, "DialogoNuevaCuenta") as dialogo:
         ui_tk.ConciliadorApp.crear_cuenta(app)
 
-    crear.assert_not_called()
+    dialogo.assert_called_once_with(app, app._registrar_cuenta)
+
+
+def test_anular_cheque_cancelado_no_ejecuta_la_operacion():
+    app = SimpleNamespace(
+        anular_num=EntradaFalsa("42"),
+        boton_anular_cheque=Mock(),
+        _ejecutar_bloqueado=Mock(),
+    )
+
+    with patch.object(ui_tk.messagebox, "askyesno", return_value=False):
+        ui_tk.ConciliadorApp.anular_cheque(app)
+
+    app._ejecutar_bloqueado.assert_not_called()
 
 
 def test_configurar_formato_abre_dialogo_para_cuenta_seleccionada():
