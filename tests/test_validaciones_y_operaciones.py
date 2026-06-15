@@ -324,6 +324,70 @@ def test_anular_deposito_conserva_datos_y_no_duplica_auditoria():
         ]
     assert acciones == ["CREAR", "ANULAR"]
 
+def test_editar_cheque_actualiza_datos_y_registra_auditoria():
+    main.guardar_cheque_en_archivo(
+        "10", "2026-06-01", "PROVEEDOR", "25", "COMPRA"
+    )
+    cheque_id = int(main.cargar_cheques_registrados().iloc[0]["Id"])
+
+    resultado = main.actualizar_cheque(
+        cheque_id, "11", "2026-06-02", "Proveedor nuevo", "30.50",
+        "Compra corregida",
+    )
+
+    cheque = main.cargar_cheques_registrados().iloc[0]
+    assert resultado["id"] == cheque_id
+    assert cheque["Num"] == "11"
+    assert cheque["Fecha"] == "2026-06-02"
+    assert cheque["Nombre"] == "PROVEEDOR NUEVO"
+    assert cheque["Monto"] == "30.50"
+    assert cheque["Descripcion"] == "COMPRA CORREGIDA"
+    with main.conectar_db() as conexion:
+        acciones = [
+            fila[0]
+            for fila in conexion.execute("SELECT accion FROM auditoria ORDER BY id")
+        ]
+    assert acciones == ["CREAR", "ACTUALIZAR"]
+
+
+def test_editar_cheque_rechaza_numero_duplicado_y_anulado():
+    main.guardar_cheque_en_archivo("10", "2026-06-01", "A", "25")
+    main.guardar_cheque_en_archivo("11", "2026-06-01", "B", "30")
+    cheques = main.cargar_cheques_registrados()
+    cheque_10 = int(cheques.loc[cheques["Num"] == "10", "Id"].iloc[0])
+
+    with pytest.raises(main.ErrorOperacion, match="ya existe"):
+        main.actualizar_cheque(
+            cheque_10, "11", "2026-06-01", "A", "25"
+        )
+
+    main.anular_cheque_numero("10")
+    with pytest.raises(main.ErrorOperacion, match="anulado"):
+        main.actualizar_cheque(
+            cheque_10, "12", "2026-06-01", "A", "25"
+        )
+
+
+def test_editar_deposito_usa_id_y_rechaza_anulados():
+    main.registrar_deposito_datos(
+        "25", "venta", fecha="2026-06-01", numero="DEP-1"
+    )
+    deposito_id = int(main.cargar_depositos_registrados().iloc[0]["Id"])
+
+    main.actualizar_deposito(
+        deposito_id, "DEP-2", "2026-06-02", "venta corregida", "35"
+    )
+
+    deposito = main.cargar_depositos_registrados().iloc[0]
+    assert deposito["Num"] == "DEP-2"
+    assert deposito["Descripcion"] == "VENTA CORREGIDA"
+    assert deposito["Monto"] == "35.00"
+    main.anular_deposito_numero("DEP-2")
+    with pytest.raises(main.ErrorOperacion, match="anulado"):
+        main.actualizar_deposito(
+            deposito_id, "DEP-3", "2026-06-03", "otra", "40"
+        )
+
 
 def test_reporte_rechaza_fecha_de_corte_invalida():
     with pytest.raises(main.ErrorOperacion, match="fecha"):

@@ -171,6 +171,57 @@ def test_editar_cuenta_abre_formulario_con_datos_seleccionados():
     assert dialogo.call_args.kwargs["cuenta"] == cuenta
 
 
+def test_actualizar_cheque_envia_datos_del_dialogo():
+    app = SimpleNamespace(
+        cuenta_id_actual=Mock(return_value=7),
+        refrescar_todo=Mock(),
+    )
+    valores = {
+        "numero": "12",
+        "fecha": "2026-06-15",
+        "nombre": "Proveedor",
+        "descripcion": "Compra",
+        "monto": "100",
+    }
+
+    with patch.object(
+        ui_tk.service,
+        "actualizar_cheque",
+        return_value={"mensaje": "Cheque actualizado"},
+    ) as actualizar, patch.object(ui_tk.messagebox, "showinfo"):
+        assert ui_tk.ConciliadorApp._actualizar_cheque(app, 3, valores)
+
+    actualizar.assert_called_once_with(
+        3, "12", "2026-06-15", "Proveedor", "100", "Compra", 7
+    )
+    app.refrescar_todo.assert_called_once_with()
+
+
+def test_actualizar_deposito_envia_datos_del_dialogo():
+    app = SimpleNamespace(
+        cuenta_id_actual=Mock(return_value=7),
+        refrescar_todo=Mock(),
+    )
+    valores = {
+        "numero": "DEP-2",
+        "fecha": "2026-06-15",
+        "descripcion": "Venta",
+        "monto": "100",
+    }
+
+    with patch.object(
+        ui_tk.service,
+        "actualizar_deposito",
+        return_value={"mensaje": "Depósito actualizado"},
+    ) as actualizar, patch.object(ui_tk.messagebox, "showinfo"):
+        assert ui_tk.ConciliadorApp._actualizar_deposito(app, 4, valores)
+
+    actualizar.assert_called_once_with(
+        4, "DEP-2", "2026-06-15", "Venta", "100", 7
+    )
+    app.refrescar_todo.assert_called_once_with()
+
+
 def test_anular_cheque_cancelado_no_ejecuta_la_operacion():
     app = SimpleNamespace(
         anular_num=EntradaFalsa("42"),

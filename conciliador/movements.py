@@ -9,7 +9,7 @@ from . import printing
 from .storage import (conectar_db, crear_respaldo_posterior, inicializar_db,
     obtener_cuenta, obtener_formato_impresion, registrar_auditoria, transaccion)
 
-COLUMNAS_CHEQUES = ["Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Nombre", "Monto", "Estado", "Descripcion"]
+COLUMNAS_CHEQUES = ["Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Nombre", "Monto", "Estado", "Descripcion"]
 
 def formatear_monto(valor):
     monto = convertir_monto(valor)
@@ -30,7 +30,7 @@ def cargar_cheques_registrados(cuenta_id=None):
     inicializar_db()
     with conectar_db() as conexion:
         consulta = """
-            SELECT c.cuenta_id AS Cuenta_id, cb.banco AS Banco,
+            SELECT c.id AS Id, c.cuenta_id AS Cuenta_id, cb.banco AS Banco,
                    cb.nombre AS Cuenta, c.numero AS Num, c.fecha AS Fecha,
                    c.nombre AS Nombre, c.monto AS Monto, c.estado AS Estado,
                    c.descripcion AS Descripcion
@@ -55,15 +55,15 @@ def cargar_cheques_registrados(cuenta_id=None):
 
 def cargar_depositos_registrados(cuenta_id=None):
     columnas = [
-        "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion", "Monto",
-        "Estado",
+        "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion",
+        "Monto", "Estado",
     ]
     vacio = crear_dataframe_vacio(columnas)
 
     inicializar_db()
     with conectar_db() as conexion:
         consulta = """
-            SELECT d.cuenta_id AS Cuenta_id, cb.banco AS Banco,
+            SELECT d.id AS Id, d.cuenta_id AS Cuenta_id, cb.banco AS Banco,
                    cb.nombre AS Cuenta, d.numero AS Num, d.fecha AS Fecha,
                    d.descripcion AS Descripcion, d.monto AS Monto,
                    d.estado AS Estado
@@ -153,6 +153,65 @@ def registrar_deposito_datos(
         "monto": monto,
         "mensaje": f"✅ Depósito de Q {formatear_monto(monto)} registrado con éxito.",
     }
+
+def actualizar_deposito(
+    deposito_id, numero, fecha, descripcion, monto, cuenta_id=None
+):
+    cuenta = obtener_cuenta(cuenta_id)
+    try:
+        deposito_id = int(deposito_id)
+    except (TypeError, ValueError) as e:
+        raise ErrorOperacion("⚠️ Depósito inválido.") from e
+    numero = str(numero or "").strip()
+    if not numero:
+        raise ErrorOperacion(
+            "⚠️ Error: el número de depósito no puede quedar vacío."
+        )
+    fecha = normalizar_fecha(fecha)
+    descripcion = str(descripcion or "").strip()
+    if not descripcion:
+        raise ErrorOperacion("⚠️ Error: el campo no puede quedar vacío.")
+    monto = convertir_monto(monto)
+    if monto is None:
+        raise ErrorOperacion("⚠️ Error: Solo usar números y punto decimal.")
+    if monto <= 0:
+        raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
+    descripcion = descripcion.upper()
+
+    with transaccion() as conexion:
+        deposito = conexion.execute(
+            """
+            SELECT estado FROM depositos
+            WHERE id = ? AND cuenta_id = ?
+            """,
+            (deposito_id, cuenta["id"]),
+        ).fetchone()
+        if deposito is None:
+            raise ErrorOperacion("⚠️ El depósito no existe en esta cuenta.")
+        if deposito["estado"] == "ANULADO":
+            raise ErrorOperacion("⚠️ Un depósito anulado no se puede editar.")
+        conexion.execute(
+            """
+            UPDATE depositos
+            SET numero = ?, fecha = ?, descripcion = ?, monto = ?,
+                actualizado_en = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                numero, fecha, descripcion, formatear_monto(monto),
+                deposito_id,
+            ),
+        )
+        registrar_auditoria(
+            conexion,
+            "ACTUALIZAR",
+            "DEPOSITO",
+            deposito_id,
+            f"{cuenta['banco']} / {cuenta['nombre']}: depósito {numero} "
+            f"actualizado a Q {formatear_monto(monto)}: {descripcion}",
+        )
+    crear_respaldo_posterior()
+    return {"id": deposito_id, "mensaje": f"✅ Depósito {numero} actualizado."}
 
 def anular_deposito_numero(numero, cuenta_id=None):
     cuenta = obtener_cuenta(cuenta_id)
@@ -256,6 +315,69 @@ def guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_
     except sqlite3.IntegrityError as e:
         raise ErrorOperacion(f"⚠️ El cheque {num} ya existe en el historial.") from e
     crear_respaldo_posterior()
+
+def actualizar_cheque(
+    cheque_id, numero, fecha, nombre, monto, descripcion="", cuenta_id=None
+):
+    cuenta = obtener_cuenta(cuenta_id)
+    try:
+        cheque_id = int(cheque_id)
+    except (TypeError, ValueError) as e:
+        raise ErrorOperacion("⚠️ Cheque inválido.") from e
+    numero = normalizar_numero_cheque(numero)
+    if not numero:
+        raise ErrorOperacion("⚠️ Error: el número de cheque debe ser mayor que cero.")
+    fecha = normalizar_fecha(fecha)
+    nombre = str(nombre or "").strip()
+    if not nombre:
+        raise ErrorOperacion("⚠️ Error: el campo no puede quedar vacío.")
+    monto = convertir_monto(monto)
+    if monto is None:
+        raise ErrorOperacion("⚠️ Error: Solo usar números y punto decimal.")
+    if monto <= 0:
+        raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
+    nombre = nombre.upper()
+    descripcion = str(descripcion or "").strip().upper()
+
+    try:
+        with transaccion() as conexion:
+            cheque = conexion.execute(
+                """
+                SELECT estado FROM cheques
+                WHERE id = ? AND cuenta_id = ?
+                """,
+                (cheque_id, cuenta["id"]),
+            ).fetchone()
+            if cheque is None:
+                raise ErrorOperacion("⚠️ El cheque no existe en esta cuenta.")
+            if cheque["estado"] == "ANULADO":
+                raise ErrorOperacion("⚠️ Un cheque anulado no se puede editar.")
+            conexion.execute(
+                """
+                UPDATE cheques
+                SET numero = ?, fecha = ?, nombre = ?, monto = ?,
+                    descripcion = ?, actualizado_en = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    numero, fecha, nombre, formatear_monto(monto),
+                    descripcion, cheque_id,
+                ),
+            )
+            registrar_auditoria(
+                conexion,
+                "ACTUALIZAR",
+                "CHEQUE",
+                cheque_id,
+                f"{cuenta['banco']} / {cuenta['nombre']}: cheque {numero} "
+                f"actualizado a Q {formatear_monto(monto)} para {nombre}",
+            )
+    except sqlite3.IntegrityError as e:
+        raise ErrorOperacion(
+            f"⚠️ El cheque {numero} ya existe en el historial."
+        ) from e
+    crear_respaldo_posterior()
+    return {"id": cheque_id, "mensaje": f"✅ Cheque {numero} actualizado."}
 
 def emitir_cheque_datos(
     num_cheque, nombre, monto, fecha=None, descripcion="", cuenta_id=None,

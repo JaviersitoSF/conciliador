@@ -18,6 +18,9 @@ class ConciliadorService:
     def emitir_cheque(self, *args, **kwargs):
         return self.operations.emitir_cheque_datos(*args, **kwargs)
 
+    def actualizar_cheque(self, *args, **kwargs):
+        return self.operations.actualizar_cheque(*args, **kwargs)
+
     def anular_cheque(self, numero, cuenta_id=None):
         return self.operations.anular_cheque_numero(numero, cuenta_id)
 
@@ -26,6 +29,9 @@ class ConciliadorService:
 
     def registrar_deposito(self, *args, **kwargs):
         return self.operations.registrar_deposito_datos(*args, **kwargs)
+
+    def actualizar_deposito(self, *args, **kwargs):
+        return self.operations.actualizar_deposito(*args, **kwargs)
 
     def anular_deposito(self, numero, cuenta_id=None):
         return self.operations.anular_deposito_numero(numero, cuenta_id)

@@ -145,6 +145,10 @@ class ConciliadorApp(tk.Tk):
         historial.rowconfigure(0, weight=1)
         historial.columnconfigure(0, weight=1)
         self.tabla_cheques = self._tabla(historial, ("Num", "Fecha", "Nombre", "Monto", "Estado"))
+        ttk.Button(
+            historial, text="Editar seleccionado", command=self.editar_cheque
+        ).grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.tabla_cheques.bind("<Double-1>", lambda _evento: self.editar_cheque())
 
     def _crear_depositos(self):
         contenedor = ttk.Frame(self.tab_depositos)
@@ -196,6 +200,12 @@ class ConciliadorApp(tk.Tk):
         historial.columnconfigure(0, weight=1)
         self.tabla_depositos = self._tabla(
             historial, ("Num", "Fecha", "Descripcion", "Monto", "Estado")
+        )
+        ttk.Button(
+            historial, text="Editar seleccionado", command=self.editar_deposito
+        ).grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.tabla_depositos.bind(
+            "<Double-1>", lambda _evento: self.editar_deposito()
         )
 
     def _crear_reporte(self):
@@ -441,6 +451,95 @@ class ConciliadorApp(tk.Tk):
         self.refrescar_todo()
         messagebox.showinfo("Depósito registrado", resultado["mensaje"])
 
+    def _movimiento_seleccionado(self, tabla, titulo):
+        seleccion = tabla.selection()
+        if not seleccion or "vacio" in tabla.item(seleccion[0], "tags"):
+            messagebox.showerror(
+                titulo,
+                "Seleccione un movimiento del historial.",
+                parent=self,
+            )
+            return None
+        return seleccion[0]
+
+    def editar_cheque(self):
+        item = self._movimiento_seleccionado(
+            self.tabla_cheques, "Editar cheque"
+        )
+        if item is None:
+            return
+        cheque = self.cheques_por_id[int(item)]
+        DialogoMovimiento(
+            self,
+            "Editar cheque",
+            (
+                ("numero", "Número de cheque"),
+                ("fecha", "Fecha (AAAA-MM-DD)"),
+                ("nombre", "Páguese a"),
+                ("descripcion", "Descripción"),
+                ("monto", "Monto"),
+            ),
+            cheque,
+            lambda valores: self._actualizar_cheque(cheque["id"], valores),
+        )
+
+    def _actualizar_cheque(self, cheque_id, valores):
+        try:
+            resultado = service.actualizar_cheque(
+                cheque_id,
+                valores["numero"],
+                valores["fecha"],
+                valores["nombre"],
+                valores["monto"],
+                valores["descripcion"],
+                self.cuenta_id_actual(),
+            )
+        except Exception as e:
+            messagebox.showerror("No se pudo actualizar", str(e))
+            return False
+        self.refrescar_todo()
+        messagebox.showinfo("Cheque actualizado", resultado["mensaje"])
+        return True
+
+    def editar_deposito(self):
+        item = self._movimiento_seleccionado(
+            self.tabla_depositos, "Editar depósito"
+        )
+        if item is None:
+            return
+        deposito = self.depositos_por_id[int(item)]
+        DialogoMovimiento(
+            self,
+            "Editar depósito",
+            (
+                ("numero", "Número de depósito"),
+                ("fecha", "Fecha (AAAA-MM-DD)"),
+                ("descripcion", "Descripción"),
+                ("monto", "Monto"),
+            ),
+            deposito,
+            lambda valores: self._actualizar_deposito(
+                deposito["id"], valores
+            ),
+        )
+
+    def _actualizar_deposito(self, deposito_id, valores):
+        try:
+            resultado = service.actualizar_deposito(
+                deposito_id,
+                valores["numero"],
+                valores["fecha"],
+                valores["descripcion"],
+                valores["monto"],
+                self.cuenta_id_actual(),
+            )
+        except Exception as e:
+            messagebox.showerror("No se pudo actualizar", str(e))
+            return False
+        self.refrescar_todo()
+        messagebox.showinfo("Depósito actualizado", resultado["mensaje"])
+        return True
+
     def anular_cheque(self):
         numero = self.anular_num.get().strip()
         if not numero:
@@ -661,15 +760,26 @@ class ConciliadorApp(tk.Tk):
     def _cargar_cheques(self):
         self._limpiar_tabla(self.tabla_cheques)
         df = service.obtener_cheques(self.cuenta_id_actual())
+        self.cheques_por_id = {}
         if df.empty:
             self._mostrar_estado_vacio(
                 self.tabla_cheques, "No hay cheques registrados"
             )
             return
         for _, fila in df.tail(30).iloc[::-1].iterrows():
+            cheque_id = int(fila["Id"])
+            self.cheques_por_id[cheque_id] = {
+                "id": cheque_id,
+                "numero": fila["Num"],
+                "fecha": fila["Fecha"],
+                "nombre": fila["Nombre"],
+                "descripcion": fila["Descripcion"],
+                "monto": fila["Monto"],
+            }
             self.tabla_cheques.insert(
                 "",
                 tk.END,
+                iid=str(cheque_id),
                 values=(fila["Num"], fila["Fecha"], fila["Nombre"], fila["Monto"], fila["Estado"]),
             )
         self._mostrar_estado_vacio(self.tabla_cheques, "No hay cheques registrados")
@@ -677,15 +787,25 @@ class ConciliadorApp(tk.Tk):
     def _cargar_depositos(self):
         self._limpiar_tabla(self.tabla_depositos)
         df = service.obtener_depositos(self.cuenta_id_actual())
+        self.depositos_por_id = {}
         if df.empty:
             self._mostrar_estado_vacio(
                 self.tabla_depositos, "No hay depósitos registrados"
             )
             return
         for _, fila in df.tail(30).iloc[::-1].iterrows():
+            deposito_id = int(fila["Id"])
+            self.depositos_por_id[deposito_id] = {
+                "id": deposito_id,
+                "numero": fila["Num"],
+                "fecha": fila["Fecha"],
+                "descripcion": fila["Descripcion"],
+                "monto": fila["Monto"],
+            }
             self.tabla_depositos.insert(
                 "",
                 tk.END,
+                iid=str(deposito_id),
                 values=(
                     fila["Num"], fila["Fecha"], fila["Descripcion"],
                     fila["Monto"], fila["Estado"],
@@ -746,6 +866,61 @@ class ConciliadorApp(tk.Tk):
         self._mostrar_estado_vacio(
             self.tabla_no_registrados, "Seleccione un estado de cuenta"
         )
+
+
+class DialogoMovimiento(tk.Toplevel):
+    def __init__(self, padre, titulo, campos, valores, al_guardar):
+        super().__init__(padre)
+        self.al_guardar = al_guardar
+        self.title(titulo)
+        self.resizable(False, False)
+        self.transient(padre)
+        self.grab_set()
+
+        contenido = ttk.Frame(self, padding=18)
+        contenido.pack(fill="both", expand=True)
+        contenido.columnconfigure(1, weight=1)
+        self.entradas = {}
+        for fila, (campo, etiqueta) in enumerate(campos):
+            ttk.Label(contenido, text=etiqueta).grid(
+                row=fila, column=0, sticky="w", padx=(0, 12), pady=6
+            )
+            entrada = ttk.Entry(contenido, width=38)
+            entrada.grid(row=fila, column=1, sticky="ew", pady=6)
+            entrada.insert(0, valores.get(campo, ""))
+            self.entradas[campo] = entrada
+
+        acciones = ttk.Frame(contenido)
+        acciones.grid(
+            row=len(campos), column=0, columnspan=2, sticky="ew", pady=(16, 0)
+        )
+        ttk.Button(acciones, text="Cancelar", command=self.destroy).pack(
+            side="right"
+        )
+        self.boton_guardar = ttk.Button(
+            acciones, text="Guardar cambios", command=self.guardar
+        )
+        self.boton_guardar.pack(side="right", padx=8)
+        self.bind("<Escape>", lambda _evento: self.destroy())
+        self.bind("<Control-s>", lambda _evento: self.guardar())
+        self.entradas[campos[0][0]].focus_set()
+
+    def guardar(self):
+        if str(self.boton_guardar.cget("state")) == "disabled":
+            return
+        valores = {
+            campo: entrada.get().strip()
+            for campo, entrada in self.entradas.items()
+        }
+        self.boton_guardar.configure(state="disabled")
+        self.update_idletasks()
+        try:
+            guardado = self.al_guardar(valores)
+        finally:
+            if self.winfo_exists():
+                self.boton_guardar.configure(state="normal")
+        if guardado:
+            self.destroy()
 
 
 class DialogoNuevaCuenta(tk.Toplevel):

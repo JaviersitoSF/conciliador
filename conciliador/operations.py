@@ -4,6 +4,8 @@ from .analytics import ARCHIVO_BANCO, obtener_conciliacion, obtener_reporte_movi
 from .domain import convertir_monto, normalizar_fecha, normalizar_numero_cheque
 from .errors import ErrorOperacion
 from .movements import (
+    actualizar_cheque,
+    actualizar_deposito,
     anular_cheque_numero,
     anular_deposito_numero,
     cargar_cheques_registrados,
