@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from num2words import num2words
+from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.units import cm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
@@ -119,7 +120,11 @@ def imprimir_cheque_pdf(
     ancho_cheque = formato["ancho"] * cm
     nombre_pdf = resolver_archivo_salida(archivo_salida or f"cheque_{num}.pdf")
     sistema = platform.system()
-    pdf = canvas.Canvas(str(nombre_pdf), pagesize=(ancho_cheque, alto_cheque))
+    if sistema == "Windows":
+        pdf = canvas.Canvas(str(nombre_pdf), pagesize=LETTER)
+        pdf.translate(0, LETTER[1] - alto_cheque)
+    else:
+        pdf = canvas.Canvas(str(nombre_pdf), pagesize=(ancho_cheque, alto_cheque))
     monto_formateado = formatear_monto_impresion(monto)
     entero, centavos = formatear_monto(monto).split(".")
     monto_en_letras = num2words(int(entero), lang="es").upper()
