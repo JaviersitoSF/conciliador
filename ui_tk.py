@@ -145,9 +145,15 @@ class ConciliadorApp(tk.Tk):
         historial.rowconfigure(0, weight=1)
         historial.columnconfigure(0, weight=1)
         self.tabla_cheques = self._tabla(historial, ("Num", "Fecha", "Nombre", "Monto", "Estado"))
+        acciones = ttk.Frame(historial)
+        acciones.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        acciones.columnconfigure((0, 1), weight=1)
         ttk.Button(
-            historial, text="Editar seleccionado", command=self.editar_cheque
-        ).grid(row=2, column=0, sticky="ew", pady=(8, 0))
+            acciones, text="Editar seleccionado", command=self.editar_cheque
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(
+            acciones, text="Borrar seleccionado", command=self.eliminar_cheque
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
         self.tabla_cheques.bind("<Double-1>", lambda _evento: self.editar_cheque())
 
     def _crear_depositos(self):
@@ -201,9 +207,15 @@ class ConciliadorApp(tk.Tk):
         self.tabla_depositos = self._tabla(
             historial, ("Num", "Fecha", "Descripcion", "Monto", "Estado")
         )
+        acciones = ttk.Frame(historial)
+        acciones.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        acciones.columnconfigure((0, 1), weight=1)
         ttk.Button(
-            historial, text="Editar seleccionado", command=self.editar_deposito
-        ).grid(row=2, column=0, sticky="ew", pady=(8, 0))
+            acciones, text="Editar seleccionado", command=self.editar_deposito
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(
+            acciones, text="Borrar seleccionado", command=self.eliminar_deposito
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
         self.tabla_depositos.bind(
             "<Double-1>", lambda _evento: self.editar_deposito()
         )
@@ -540,6 +552,58 @@ class ConciliadorApp(tk.Tk):
         messagebox.showinfo("Depósito actualizado", resultado["mensaje"])
         return True
 
+    def eliminar_cheque(self):
+        item = self._movimiento_seleccionado(
+            self.tabla_cheques, "Borrar cheque"
+        )
+        if item is None:
+            return
+        cheque = self.cheques_por_id[int(item)]
+        confirmar = messagebox.askyesno(
+            "Confirmar borrado",
+            f"¿Desea borrar permanentemente el cheque {cheque['numero']} "
+            f"por Q {cheque['monto']}?\n\nEsta acción no se puede deshacer.",
+            icon="warning",
+            parent=self,
+        )
+        if not confirmar:
+            return
+        try:
+            resultado = service.eliminar_cheque(
+                cheque["id"], self.cuenta_id_actual()
+            )
+        except Exception as e:
+            messagebox.showerror("No se pudo borrar", str(e))
+            return
+        self.refrescar_todo()
+        messagebox.showinfo("Cheque eliminado", resultado["mensaje"])
+
+    def eliminar_deposito(self):
+        item = self._movimiento_seleccionado(
+            self.tabla_depositos, "Borrar depósito"
+        )
+        if item is None:
+            return
+        deposito = self.depositos_por_id[int(item)]
+        confirmar = messagebox.askyesno(
+            "Confirmar borrado",
+            f"¿Desea borrar permanentemente el depósito {deposito['numero']} "
+            f"por Q {deposito['monto']}?\n\nEsta acción no se puede deshacer.",
+            icon="warning",
+            parent=self,
+        )
+        if not confirmar:
+            return
+        try:
+            resultado = service.eliminar_deposito(
+                deposito["id"], self.cuenta_id_actual()
+            )
+        except Exception as e:
+            messagebox.showerror("No se pudo borrar", str(e))
+            return
+        self.refrescar_todo()
+        messagebox.showinfo("Depósito eliminado", resultado["mensaje"])
+
     def anular_cheque(self):
         numero = self.anular_num.get().strip()
         if not numero:
@@ -875,7 +939,6 @@ class DialogoMovimiento(tk.Toplevel):
         self.title(titulo)
         self.resizable(False, False)
         self.transient(padre)
-        self.grab_set()
 
         contenido = ttk.Frame(self, padding=18)
         contenido.pack(fill="both", expand=True)
@@ -903,6 +966,8 @@ class DialogoMovimiento(tk.Toplevel):
         self.boton_guardar.pack(side="right", padx=8)
         self.bind("<Escape>", lambda _evento: self.destroy())
         self.bind("<Control-s>", lambda _evento: self.guardar())
+        self.wait_visibility()
+        self.grab_set()
         self.entradas[campos[0][0]].focus_set()
 
     def guardar(self):

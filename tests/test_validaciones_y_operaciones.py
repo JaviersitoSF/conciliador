@@ -388,6 +388,40 @@ def test_editar_deposito_usa_id_y_rechaza_anulados():
             deposito_id, "DEP-3", "2026-06-03", "otra", "40"
         )
 
+def test_eliminar_cheque_y_deposito_respeta_la_cuenta_y_registra_auditoria():
+    cuenta_a = main.crear_cuenta_bancaria("BANCO", "A", "1")
+    cuenta_b = main.crear_cuenta_bancaria("BANCO", "B", "2")
+    main.guardar_cheque_en_archivo(
+        "10", "2026-06-01", "A", "25", cuenta_id=cuenta_a
+    )
+    main.registrar_deposito_datos(
+        "30", "venta", fecha="2026-06-01", cuenta_id=cuenta_a,
+        numero="DEP-1",
+    )
+    cheque_id = int(main.cargar_cheques_registrados(cuenta_a).iloc[0]["Id"])
+    deposito_id = int(
+        main.cargar_depositos_registrados(cuenta_a).iloc[0]["Id"]
+    )
+
+    with pytest.raises(main.ErrorOperacion, match="esta cuenta"):
+        main.eliminar_cheque(cheque_id, cuenta_b)
+    with pytest.raises(main.ErrorOperacion, match="esta cuenta"):
+        main.eliminar_deposito(deposito_id, cuenta_b)
+
+    main.eliminar_cheque(cheque_id, cuenta_a)
+    main.eliminar_deposito(deposito_id, cuenta_a)
+
+    assert main.cargar_cheques_registrados(cuenta_a).empty
+    assert main.cargar_depositos_registrados(cuenta_a).empty
+    with main.conectar_db() as conexion:
+        eliminaciones = conexion.execute(
+            """
+            SELECT entidad FROM auditoria
+            WHERE accion = 'ELIMINAR' ORDER BY id
+            """
+        ).fetchall()
+    assert [fila[0] for fila in eliminaciones] == ["CHEQUE", "DEPOSITO"]
+
 
 def test_reporte_rechaza_fecha_de_corte_invalida():
     with pytest.raises(main.ErrorOperacion, match="fecha"):

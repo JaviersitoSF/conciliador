@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from pathlib import Path
 
 import ui_tk
 
@@ -26,6 +27,17 @@ class VariableFalsa:
 
     def get(self):
         return self.valor
+
+
+def test_dialogo_movimiento_espera_ser_visible_antes_del_grab():
+    fuente = Path(ui_tk.__file__).read_text(encoding="utf-8")
+    inicio = fuente.index("class DialogoMovimiento")
+    fin = fuente.index("\nclass ", inicio + 1)
+    dialogo = fuente[inicio:fin]
+
+    assert dialogo.index("self.wait_visibility()") < dialogo.index(
+        "self.grab_set()"
+    )
 
 
 def test_emitir_cheque_incluye_descripcion_y_opcion_de_impresion():
@@ -233,6 +245,36 @@ def test_anular_cheque_cancelado_no_ejecuta_la_operacion():
         ui_tk.ConciliadorApp.anular_cheque(app)
 
     app._ejecutar_bloqueado.assert_not_called()
+
+def test_eliminar_cheque_confirmado_usa_id_y_cuenta_seleccionada():
+    tabla = Mock()
+    tabla.selection.return_value = ("3",)
+    tabla.item.return_value = {"tags": ()}
+    app = SimpleNamespace(
+        tabla_cheques=tabla,
+        cheques_por_id={
+            3: {"id": 3, "numero": "12", "monto": "100.00"}
+        },
+        cuenta_id_actual=Mock(return_value=7),
+        refrescar_todo=Mock(),
+    )
+    app._movimiento_seleccionado = (
+        lambda tabla, titulo: ui_tk.ConciliadorApp._movimiento_seleccionado(
+            app, tabla, titulo
+        )
+    )
+
+    with patch.object(
+        ui_tk.messagebox, "askyesno", return_value=True
+    ), patch.object(
+        ui_tk.service,
+        "eliminar_cheque",
+        return_value={"mensaje": "Cheque eliminado"},
+    ) as eliminar, patch.object(ui_tk.messagebox, "showinfo"):
+        ui_tk.ConciliadorApp.eliminar_cheque(app)
+
+    eliminar.assert_called_once_with(3, 7)
+    app.refrescar_todo.assert_called_once_with()
 
 
 def test_configurar_formato_abre_dialogo_para_cuenta_seleccionada():

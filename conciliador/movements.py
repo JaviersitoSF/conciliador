@@ -213,6 +213,42 @@ def actualizar_deposito(
     crear_respaldo_posterior()
     return {"id": deposito_id, "mensaje": f"✅ Depósito {numero} actualizado."}
 
+def eliminar_deposito(deposito_id, cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    try:
+        deposito_id = int(deposito_id)
+    except (TypeError, ValueError) as e:
+        raise ErrorOperacion("⚠️ Depósito inválido.") from e
+
+    with transaccion() as conexion:
+        deposito = conexion.execute(
+            """
+            SELECT numero, monto, descripcion FROM depositos
+            WHERE id = ? AND cuenta_id = ?
+            """,
+            (deposito_id, cuenta["id"]),
+        ).fetchone()
+        if deposito is None:
+            raise ErrorOperacion("⚠️ El depósito no existe en esta cuenta.")
+        registrar_auditoria(
+            conexion,
+            "ELIMINAR",
+            "DEPOSITO",
+            deposito_id,
+            f"{cuenta['banco']} / {cuenta['nombre']}: depósito "
+            f"{deposito['numero']} Q {deposito['monto']} eliminado: "
+            f"{deposito['descripcion']}",
+        )
+        conexion.execute(
+            "DELETE FROM depositos WHERE id = ? AND cuenta_id = ?",
+            (deposito_id, cuenta["id"]),
+        )
+    crear_respaldo_posterior()
+    return {
+        "id": deposito_id,
+        "mensaje": f"✅ Depósito {deposito['numero']} eliminado.",
+    }
+
 def anular_deposito_numero(numero, cuenta_id=None):
     cuenta = obtener_cuenta(cuenta_id)
     numero = str(numero or "").strip()
@@ -378,6 +414,42 @@ def actualizar_cheque(
         ) from e
     crear_respaldo_posterior()
     return {"id": cheque_id, "mensaje": f"✅ Cheque {numero} actualizado."}
+
+def eliminar_cheque(cheque_id, cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    try:
+        cheque_id = int(cheque_id)
+    except (TypeError, ValueError) as e:
+        raise ErrorOperacion("⚠️ Cheque inválido.") from e
+
+    with transaccion() as conexion:
+        cheque = conexion.execute(
+            """
+            SELECT numero, monto, nombre FROM cheques
+            WHERE id = ? AND cuenta_id = ?
+            """,
+            (cheque_id, cuenta["id"]),
+        ).fetchone()
+        if cheque is None:
+            raise ErrorOperacion("⚠️ El cheque no existe en esta cuenta.")
+        registrar_auditoria(
+            conexion,
+            "ELIMINAR",
+            "CHEQUE",
+            cheque_id,
+            f"{cuenta['banco']} / {cuenta['nombre']}: cheque "
+            f"{cheque['numero']} Q {cheque['monto']} para "
+            f"{cheque['nombre']} eliminado.",
+        )
+        conexion.execute(
+            "DELETE FROM cheques WHERE id = ? AND cuenta_id = ?",
+            (cheque_id, cuenta["id"]),
+        )
+    crear_respaldo_posterior()
+    return {
+        "id": cheque_id,
+        "mensaje": f"✅ Cheque {cheque['numero']} eliminado.",
+    }
 
 def emitir_cheque_datos(
     num_cheque, nombre, monto, fecha=None, descripcion="", cuenta_id=None,

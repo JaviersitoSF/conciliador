@@ -11,6 +11,8 @@ from .movements import (
     cargar_cheques_registrados,
     cargar_depositos_registrados,
     cheque_ya_registrado,
+    eliminar_cheque,
+    eliminar_deposito,
     emitir_cheque_datos,
     formatear_monto,
     guardar_cheque_en_archivo,
