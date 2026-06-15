@@ -22,7 +22,7 @@ BASE_TABLES = {
         "descripcion", "creado_en", "actualizado_en",
     },
     "depositos": {
-        "id", "cuenta_id", "fecha", "descripcion", "monto", "creado_en"
+        "id", "cuenta_id", "fecha", "descripcion", "monto", "creado_en",
     },
     "auditoria": {
         "id", "fecha_hora", "accion", "entidad", "entidad_id", "detalle"
@@ -63,6 +63,7 @@ CREATE TABLE cheques (
 CREATE TABLE depositos (
     id INTEGER PRIMARY KEY,
     cuenta_id INTEGER NOT NULL,
+    numero TEXT NOT NULL DEFAULT '',
     fecha TEXT NOT NULL,
     descripcion TEXT NOT NULL,
     monto TEXT NOT NULL,
@@ -114,7 +115,20 @@ def _upgrade_1(connection):
             connection.execute(statement)
 
 
-MIGRATIONS = (Migration(1, "esquema_inicial", _upgrade_1),)
+def _upgrade_2(connection):
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(depositos)")
+    }
+    if "numero" not in columns:
+        connection.execute(
+            "ALTER TABLE depositos ADD COLUMN numero TEXT NOT NULL DEFAULT ''"
+        )
+
+
+MIGRATIONS = (
+    Migration(1, "esquema_inicial", _upgrade_1),
+    Migration(2, "numero_deposito", _upgrade_2),
+)
 LATEST_VERSION = MIGRATIONS[-1].version
 
 

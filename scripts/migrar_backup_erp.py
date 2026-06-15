@@ -255,11 +255,12 @@ def migrar(origen, destino):
             conexion.execute(
                 """
                 INSERT INTO depositos
-                    (cuenta_id, fecha, descripcion, monto, creado_en)
-                VALUES (?, ?, ?, ?, ?)
+                    (cuenta_id, numero, fecha, descripcion, monto, creado_en)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     chequera_id,
+                    str(fila[3]),
                     str(fila[6])[:10],
                     descripcion,
                     monto,

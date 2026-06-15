@@ -33,6 +33,7 @@ class Cheque:
 @dataclass(frozen=True)
 class Deposito:
     cuenta_id: int
+    numero: str
     fecha: str
     descripcion: str
     monto: Decimal

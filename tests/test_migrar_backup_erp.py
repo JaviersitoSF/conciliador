@@ -59,7 +59,7 @@ def test_migra_dump_al_esquema_versionado_actual(tmp_path):
         ).fetchone()
         deposito_migrado = conexion.execute(
             """
-            SELECT cuenta_id, fecha, descripcion, monto, creado_en
+            SELECT cuenta_id, numero, fecha, descripcion, monto, creado_en
             FROM depositos
             """
         ).fetchone()
@@ -71,6 +71,7 @@ def test_migra_dump_al_esquema_versionado_actual(tmp_path):
     assert cheque_migrado == (7, "42", "Proveedor, S.A.", "125.50", "TRANSITO")
     assert deposito_migrado == (
         7,
+        "1234",
         "2026-06-11",
         "Venta caja",
         "850.40",

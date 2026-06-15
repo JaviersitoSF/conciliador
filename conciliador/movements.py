@@ -54,14 +54,16 @@ def cargar_cheques_registrados(cuenta_id=None):
     return df
 
 def cargar_depositos_registrados(cuenta_id=None):
-    columnas = ["Cuenta_id", "Banco", "Cuenta", "Fecha", "Descripcion", "Monto"]
+    columnas = [
+        "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion", "Monto"
+    ]
     vacio = crear_dataframe_vacio(columnas)
 
     inicializar_db()
     with conectar_db() as conexion:
         consulta = """
             SELECT d.cuenta_id AS Cuenta_id, cb.banco AS Banco,
-                   cb.nombre AS Cuenta, d.fecha AS Fecha,
+                   cb.nombre AS Cuenta, d.numero AS Num, d.fecha AS Fecha,
                    d.descripcion AS Descripcion, d.monto AS Monto
             FROM depositos d
             JOIN cuentas_bancarias cb ON cb.id = d.cuenta_id
@@ -95,8 +97,15 @@ def cheque_ya_registrado(numero, cuenta_id=None):
         ).fetchone()
     return fila is not None
 
-def registrar_deposito_datos(monto, descripcion, fecha=None, cuenta_id=None):
+def registrar_deposito_datos(
+    monto, descripcion, fecha=None, cuenta_id=None, numero=None
+):
     cuenta = obtener_cuenta(cuenta_id)
+    numero = str(numero or "").strip()
+    if not numero:
+        raise ErrorOperacion(
+            "⚠️ Error: el número de depósito no puede quedar vacío."
+        )
     monto = convertir_monto(monto)
     if monto is None:
         raise ErrorOperacion("⚠️ Error: Solo usar números y punto decimal.")
@@ -115,23 +124,28 @@ def registrar_deposito_datos(monto, descripcion, fecha=None, cuenta_id=None):
     with transaccion() as conexion:
         cursor = conexion.execute(
             """
-            INSERT INTO depositos (cuenta_id, fecha, descripcion, monto)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO depositos
+                (cuenta_id, numero, fecha, descripcion, monto)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (cuenta["id"], fecha, descripcion, formatear_monto(monto)),
+            (
+                cuenta["id"], numero, fecha, descripcion,
+                formatear_monto(monto),
+            ),
         )
         registrar_auditoria(
             conexion,
             "CREAR",
             "DEPOSITO",
             cursor.lastrowid,
-            f"{cuenta['banco']} / {cuenta['nombre']}: depósito "
+            f"{cuenta['banco']} / {cuenta['nombre']}: depósito {numero} "
             f"Q {formatear_monto(monto)}: {descripcion}",
         )
     crear_respaldo_posterior()
 
     return {
         "fecha": fecha,
+        "numero": numero,
         "descripcion": descripcion,
         "cuenta_id": cuenta["id"],
         "monto": monto,

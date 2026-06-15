@@ -61,11 +61,13 @@ class SistemaBancarioTests(unittest.TestCase):
 
     def test_registrar_deposito_es_transaccional_y_auditable(self):
         resultado = main.registrar_deposito_datos(
-            "125.50", "venta caja", fecha="2026-06-03"
+            "125.50", "venta caja", fecha="2026-06-03", numero="DEP-15"
         )
 
         depositos = main.cargar_depositos_registrados()
         self.assertEqual(resultado["monto"], Decimal("125.50"))
+        self.assertEqual(resultado["numero"], "DEP-15")
+        self.assertEqual(depositos.iloc[0]["Num"], "DEP-15")
         self.assertEqual(depositos.iloc[0]["Descripcion"], "VENTA CAJA")
         self.assertEqual(depositos.iloc[0]["Monto_valor"], Decimal("125.50"))
         self.assertEqual(self.auditoria()[0]["accion"], "CREAR")
@@ -100,8 +102,9 @@ class SistemaBancarioTests(unittest.TestCase):
             with main.transaccion() as conexion:
                 conexion.execute(
                     """
-                    INSERT INTO depositos (cuenta_id, fecha, descripcion, monto)
-                    VALUES (1, '2026-06-03', 'PRUEBA', '10.00')
+                    INSERT INTO depositos
+                        (cuenta_id, numero, fecha, descripcion, monto)
+                    VALUES (1, '1', '2026-06-03', 'PRUEBA', '10.00')
                     """
                 )
                 main.registrar_auditoria(
@@ -137,7 +140,9 @@ class SistemaBancarioTests(unittest.TestCase):
         main.guardar_cheque_en_archivo("1", "2026-06-03", "A", "50.00")
         main.guardar_cheque_en_archivo("2", "2026-06-04", "B", "20.00")
         main.anular_cheque_numero("2")
-        main.registrar_deposito_datos("100.00", "venta", fecha="2026-06-05")
+        main.registrar_deposito_datos(
+            "100.00", "venta", fecha="2026-06-05", numero="10"
+        )
 
         reporte = main.obtener_reporte_movimientos("2026-06-08")
 
@@ -189,10 +194,12 @@ class SistemaBancarioTests(unittest.TestCase):
             "100", "2026-06-03", "B", "20.00", cuenta_id=cuenta_b
         )
         main.registrar_deposito_datos(
-            "50.00", "venta a", fecha="2026-06-03", cuenta_id=cuenta_a
+            "50.00", "venta a", fecha="2026-06-03", cuenta_id=cuenta_a,
+            numero="20",
         )
         main.registrar_deposito_datos(
-            "80.00", "venta b", fecha="2026-06-03", cuenta_id=cuenta_b
+            "80.00", "venta b", fecha="2026-06-03", cuenta_id=cuenta_b,
+            numero="20",
         )
 
         reporte_a = main.obtener_reporte_movimientos("2026-06-08", cuenta_a)

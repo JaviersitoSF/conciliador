@@ -73,6 +73,39 @@ def test_fin_de_mes_usa_el_ultimo_dia_del_periodo():
     assert ui_tk.ConciliadorApp._fin_de_mes("2026-06") == "2026-06-30"
 
 
+def test_registrar_deposito_incluye_numero():
+    entradas = [
+        EntradaFalsa("DEP-18"),
+        EntradaFalsa("Venta"),
+        EntradaFalsa("100.50"),
+        EntradaFalsa("2026-06-15"),
+    ]
+    app = SimpleNamespace(
+        deposito_num=entradas[0],
+        deposito_desc=entradas[1],
+        deposito_monto=entradas[2],
+        deposito_fecha=entradas[3],
+        cuenta_id_actual=Mock(return_value=7),
+        refrescar_todo=Mock(),
+    )
+
+    with patch.object(
+        ui_tk.service,
+        "registrar_deposito",
+        return_value={"mensaje": "Depósito registrado"},
+    ) as registrar, patch.object(ui_tk.messagebox, "showinfo"):
+        ui_tk.ConciliadorApp._registrar_deposito(app)
+
+    registrar.assert_called_once_with(
+        "100.50",
+        "Venta",
+        fecha="2026-06-15",
+        cuenta_id=7,
+        numero="DEP-18",
+    )
+    assert entradas[0].eliminada
+
+
 def test_emitir_cheque_rechaza_descripcion_vacia_como_la_tui():
     app = SimpleNamespace(
         cheque_descripcion=EntradaFalsa("   "),

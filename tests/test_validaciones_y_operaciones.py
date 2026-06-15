@@ -40,7 +40,7 @@ def test_normalizar_numero_cheque_acepta_enteros_de_excel(valor, esperado):
 )
 def test_operaciones_rechazan_fechas_invalidas(fecha):
     with pytest.raises(main.ErrorOperacion, match="fecha"):
-        main.registrar_deposito_datos("10", "VENTA", fecha=fecha)
+        main.registrar_deposito_datos("10", "VENTA", fecha=fecha, numero="1")
 
     with patch("conciliador.operations.imprimir_cheque_pdf") as imprimir, \
             pytest.raises(main.ErrorOperacion, match="fecha"):
@@ -162,7 +162,7 @@ def test_prueba_de_formato_no_registra_movimientos_ni_auditoria():
 def test_depositos_invalidos_no_escriben_datos_ni_auditoria(monto, descripcion):
     with pytest.raises(main.ErrorOperacion):
         main.registrar_deposito_datos(
-            monto, descripcion, fecha="2026-06-01"
+            monto, descripcion, fecha="2026-06-01", numero="1"
         )
 
     assert main.cargar_depositos_registrados().empty
@@ -174,7 +174,7 @@ def test_falla_de_respaldo_informa_que_la_operacion_si_se_guardo():
     with patch("conciliador.storage.crear_respaldo", side_effect=OSError("sin espacio")), \
             pytest.raises(main.ErrorOperacion, match="sí se guardó.*respaldo"):
         main.registrar_deposito_datos(
-            "10", "VENTA", fecha="2026-06-01"
+            "10", "VENTA", fecha="2026-06-01", numero="1"
         )
 
     depositos = main.cargar_depositos_registrados()

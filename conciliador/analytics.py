@@ -220,7 +220,9 @@ def obtener_reporte_movimientos(fecha=None, cuenta_id=None):
             Decimal("0.00"),
         )
     else:
-        df_depositos_mes = pd.DataFrame(columns=["Fecha", "Descripcion", "Monto"])
+        df_depositos_mes = pd.DataFrame(
+            columns=["Num", "Fecha", "Descripcion", "Monto"]
+        )
 
     saldo = total_depositos - total_cheques
 

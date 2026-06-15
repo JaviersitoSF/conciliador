@@ -68,6 +68,7 @@ def inicializar_db():
             CREATE TABLE IF NOT EXISTS depositos (
                 id INTEGER PRIMARY KEY,
                 cuenta_id INTEGER NOT NULL,
+                numero TEXT NOT NULL DEFAULT '',
                 fecha TEXT NOT NULL,
                 descripcion TEXT NOT NULL,
                 monto TEXT NOT NULL,

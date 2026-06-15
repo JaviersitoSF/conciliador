@@ -105,9 +105,10 @@ class ConciliadorApp(tk.Tk):
         )
         self.cheque_monto.bind("<Return>", lambda _evento: self.emitir_cheque())
 
-        self.deposito_desc = self._campo(deposito, "Descripción", 0)
-        self.deposito_monto = self._campo(deposito, "Monto", 1)
-        self.deposito_fecha = self._campo(deposito, "Fecha (AAAA-MM-DD)", 2)
+        self.deposito_num = self._campo(deposito, "Número de depósito", 0)
+        self.deposito_desc = self._campo(deposito, "Descripción", 1)
+        self.deposito_monto = self._campo(deposito, "Monto", 2)
+        self.deposito_fecha = self._campo(deposito, "Fecha (AAAA-MM-DD)", 3)
         self.deposito_fecha.insert(0, date.today().isoformat())
         self.boton_registrar_deposito = ttk.Button(
             deposito,
@@ -115,7 +116,7 @@ class ConciliadorApp(tk.Tk):
             command=self.registrar_deposito,
         )
         self.boton_registrar_deposito.grid(
-            row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+            row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0)
         )
         self.deposito_monto.bind(
             "<Return>", lambda _evento: self.registrar_deposito()
@@ -194,7 +195,9 @@ class ConciliadorApp(tk.Tk):
         depositos.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         depositos.rowconfigure(0, weight=1)
         depositos.columnconfigure(0, weight=1)
-        self.tabla_reporte_depositos = self._tabla(depositos, ("Fecha", "Descripcion", "Monto"))
+        self.tabla_reporte_depositos = self._tabla(
+            depositos, ("Numero", "Fecha", "Descripcion", "Monto")
+        )
 
     def _crear_conciliacion(self):
         acciones = ttk.Frame(self.tab_conciliacion)
@@ -387,10 +390,12 @@ class ConciliadorApp(tk.Tk):
                 self.deposito_desc.get(),
                 fecha=self.deposito_fecha.get(),
                 cuenta_id=self.cuenta_id_actual(),
+                numero=self.deposito_num.get(),
             )
         except Exception as e:
             messagebox.showerror("No se pudo registrar", str(e))
             return
+        self.deposito_num.delete(0, tk.END)
         self.deposito_desc.delete(0, tk.END)
         self.deposito_monto.delete(0, tk.END)
         self.deposito_fecha.delete(0, tk.END)
@@ -621,7 +626,9 @@ class ConciliadorApp(tk.Tk):
             self.tabla_reporte_depositos.insert(
                 "",
                 tk.END,
-                values=(fila["Fecha"], fila["Descripcion"], fila["Monto"]),
+                values=(
+                    fila["Num"], fila["Fecha"], fila["Descripcion"], fila["Monto"]
+                ),
             )
         self._mostrar_estado_vacio(
             self.tabla_reporte_cheques, "No hay cheques en el período"
