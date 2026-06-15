@@ -304,6 +304,26 @@ def test_anular_busca_existencia_solo_en_la_cuenta_seleccionada():
     with pytest.raises(main.ErrorOperacion, match="No hay registro"):
         main.anular_cheque_numero("1", cuenta_id=cuenta_sin_cheques)
 
+def test_anular_deposito_conserva_datos_y_no_duplica_auditoria():
+    main.registrar_deposito_datos(
+        "25", "venta", fecha="2026-06-01", numero="DEP-1"
+    )
+    main.anular_deposito_numero("DEP-1")
+
+    deposito = main.cargar_depositos_registrados().iloc[0]
+    assert deposito["Estado"] == "ANULADO"
+    assert deposito["Descripcion"] == "VENTA"
+
+    with pytest.raises(main.ErrorOperacion, match="ya está anulado"):
+        main.anular_deposito_numero("DEP-1")
+
+    with main.conectar_db() as conexion:
+        acciones = [
+            fila[0]
+            for fila in conexion.execute("SELECT accion FROM auditoria ORDER BY id")
+        ]
+    assert acciones == ["CREAR", "ANULAR"]
+
 
 def test_reporte_rechaza_fecha_de_corte_invalida():
     with pytest.raises(main.ErrorOperacion, match="fecha"):

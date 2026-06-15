@@ -61,29 +61,32 @@ class ConciliadorApp(tk.Tk):
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=18, pady=(0, 18))
 
-        self.tab_operaciones = ttk.Frame(self.notebook, padding=14)
+        self.tab_cheques = ttk.Frame(self.notebook, padding=14)
+        self.tab_depositos = ttk.Frame(self.notebook, padding=14)
         self.tab_reporte = ttk.Frame(self.notebook, padding=14)
         self.tab_conciliacion = ttk.Frame(self.notebook, padding=14)
 
-        self.notebook.add(self.tab_operaciones, text="Operaciones")
+        self.notebook.add(self.tab_cheques, text="Cheques")
+        self.notebook.add(self.tab_depositos, text="Depósitos")
         self.notebook.add(self.tab_reporte, text="Corte de caja")
         self.notebook.add(self.tab_conciliacion, text="Conciliación")
 
-        self._crear_operaciones()
+        self._crear_cheques()
+        self._crear_depositos()
         self._crear_reporte()
         self._crear_conciliacion()
 
-    def _crear_operaciones(self):
-        contenedor = ttk.Frame(self.tab_operaciones)
+    def _crear_cheques(self):
+        contenedor = ttk.Frame(self.tab_cheques)
         contenedor.pack(fill="both", expand=True)
-        contenedor.columnconfigure((0, 1), weight=1, uniform="ops")
-        contenedor.rowconfigure(1, weight=1)
+        contenedor.columnconfigure((0, 1), weight=1, uniform="cheques")
+        contenedor.rowconfigure(0, weight=1)
 
-        cheque = ttk.LabelFrame(contenedor, text="Emitir cheque", padding=14)
-        cheque.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 12))
-        deposito = ttk.LabelFrame(contenedor, text="Registrar depósito", padding=14)
-        deposito.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 12))
-
+        controles = ttk.Frame(contenedor)
+        controles.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        controles.columnconfigure(0, weight=1)
+        cheque = ttk.LabelFrame(controles, text="Emitir cheque", padding=14)
+        cheque.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.cheque_num = self._campo(cheque, "Número de cheque", 0)
         self.cheque_nombre = self._campo(cheque, "Páguese a", 1)
         self.cheque_descripcion = self._campo(cheque, "Descripción", 2)
@@ -105,25 +108,8 @@ class ConciliadorApp(tk.Tk):
         )
         self.cheque_monto.bind("<Return>", lambda _evento: self.emitir_cheque())
 
-        self.deposito_num = self._campo(deposito, "Número de depósito", 0)
-        self.deposito_desc = self._campo(deposito, "Descripción", 1)
-        self.deposito_monto = self._campo(deposito, "Monto", 2)
-        self.deposito_fecha = self._campo(deposito, "Fecha (AAAA-MM-DD)", 3)
-        self.deposito_fecha.insert(0, date.today().isoformat())
-        self.boton_registrar_deposito = ttk.Button(
-            deposito,
-            text="Registrar depósito",
-            command=self.registrar_deposito,
-        )
-        self.boton_registrar_deposito.grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0)
-        )
-        self.deposito_monto.bind(
-            "<Return>", lambda _evento: self.registrar_deposito()
-        )
-
-        acciones_cheque = ttk.Frame(contenedor)
-        acciones_cheque.grid(row=1, column=0, sticky="new", padx=(0, 8))
+        acciones_cheque = ttk.Frame(controles)
+        acciones_cheque.grid(row=1, column=0, sticky="ew")
         acciones_cheque.columnconfigure(0, weight=1)
 
         anular = ttk.LabelFrame(acciones_cheque, text="Anular cheque", padding=14)
@@ -155,10 +141,62 @@ class ConciliadorApp(tk.Tk):
         )
 
         historial = ttk.LabelFrame(contenedor, text="Cheques recientes", padding=10)
-        historial.grid(row=1, column=1, sticky="nsew", padx=(8, 0))
+        historial.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         historial.rowconfigure(0, weight=1)
         historial.columnconfigure(0, weight=1)
         self.tabla_cheques = self._tabla(historial, ("Num", "Fecha", "Nombre", "Monto", "Estado"))
+
+    def _crear_depositos(self):
+        contenedor = ttk.Frame(self.tab_depositos)
+        contenedor.pack(fill="both", expand=True)
+        contenedor.columnconfigure((0, 1), weight=1, uniform="depositos")
+        contenedor.rowconfigure(0, weight=1)
+
+        controles = ttk.Frame(contenedor)
+        controles.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        controles.columnconfigure(0, weight=1)
+
+        deposito = ttk.LabelFrame(controles, text="Registrar depósito", padding=14)
+        deposito.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        self.deposito_num = self._campo(deposito, "Número de depósito", 0)
+        self.deposito_desc = self._campo(deposito, "Descripción", 1)
+        self.deposito_monto = self._campo(deposito, "Monto", 2)
+        self.deposito_fecha = self._campo(deposito, "Fecha (AAAA-MM-DD)", 3)
+        self.deposito_fecha.insert(0, date.today().isoformat())
+        self.boton_registrar_deposito = ttk.Button(
+            deposito, text="Registrar depósito", command=self.registrar_deposito
+        )
+        self.boton_registrar_deposito.grid(
+            row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        )
+        self.deposito_monto.bind(
+            "<Return>", lambda _evento: self.registrar_deposito()
+        )
+
+        anular = ttk.LabelFrame(controles, text="Anular depósito", padding=14)
+        anular.grid(row=1, column=0, sticky="ew")
+        self.anular_deposito_num = self._campo(
+            anular, "Número de depósito", 0
+        )
+        self.boton_anular_deposito = ttk.Button(
+            anular, text="Marcar como anulado", command=self.anular_deposito
+        )
+        self.boton_anular_deposito.grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        )
+        self.anular_deposito_num.bind(
+            "<Return>", lambda _evento: self.anular_deposito()
+        )
+
+        historial = ttk.LabelFrame(
+            contenedor, text="Depósitos recientes", padding=10
+        )
+        historial.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        historial.rowconfigure(0, weight=1)
+        historial.columnconfigure(0, weight=1)
+        self.tabla_depositos = self._tabla(
+            historial, ("Num", "Fecha", "Descripcion", "Monto", "Estado")
+        )
 
     def _crear_reporte(self):
         acciones = ttk.Frame(self.tab_reporte)
@@ -196,7 +234,7 @@ class ConciliadorApp(tk.Tk):
         depositos.rowconfigure(0, weight=1)
         depositos.columnconfigure(0, weight=1)
         self.tabla_reporte_depositos = self._tabla(
-            depositos, ("Numero", "Fecha", "Descripcion", "Monto")
+            depositos, ("Numero", "Fecha", "Descripcion", "Monto", "Estado")
         )
 
     def _crear_conciliacion(self):
@@ -438,6 +476,41 @@ class ConciliadorApp(tk.Tk):
         self.refrescar_todo()
         messagebox.showinfo("Cheque anulado", resultado["mensaje"])
 
+    def anular_deposito(self):
+        numero = self.anular_deposito_num.get().strip()
+        if not numero:
+            messagebox.showerror(
+                "No se pudo anular",
+                "Ingrese el número de depósito que desea anular.",
+                parent=self,
+            )
+            self.anular_deposito_num.focus_set()
+            return
+        confirmar = messagebox.askyesno(
+            "Confirmar anulación",
+            f"¿Desea marcar como anulado el depósito {numero}?\n\n"
+            "Esta acción cambia su estado en el registro.",
+            icon="warning",
+            parent=self,
+        )
+        if not confirmar:
+            return
+        return self._ejecutar_bloqueado(
+            self.boton_anular_deposito, self._anular_deposito
+        )
+
+    def _anular_deposito(self):
+        try:
+            resultado = service.anular_deposito(
+                self.anular_deposito_num.get(), self.cuenta_id_actual()
+            )
+        except Exception as e:
+            messagebox.showerror("No se pudo anular", str(e))
+            return
+        self.anular_deposito_num.delete(0, tk.END)
+        self.refrescar_todo()
+        messagebox.showinfo("Depósito anulado", resultado["mensaje"])
+
     def reimprimir_cheque(self):
         return self._ejecutar_bloqueado(
             self.boton_reimprimir_cheque, self._reimprimir_cheque
@@ -492,6 +565,7 @@ class ConciliadorApp(tk.Tk):
     def refrescar_todo(self):
         self._cargar_selector_cuentas()
         self._cargar_cheques()
+        self._cargar_depositos()
         self._cargar_reporte()
         self._limpiar_conciliacion()
 
@@ -600,6 +674,27 @@ class ConciliadorApp(tk.Tk):
             )
         self._mostrar_estado_vacio(self.tabla_cheques, "No hay cheques registrados")
 
+    def _cargar_depositos(self):
+        self._limpiar_tabla(self.tabla_depositos)
+        df = service.obtener_depositos(self.cuenta_id_actual())
+        if df.empty:
+            self._mostrar_estado_vacio(
+                self.tabla_depositos, "No hay depósitos registrados"
+            )
+            return
+        for _, fila in df.tail(30).iloc[::-1].iterrows():
+            self.tabla_depositos.insert(
+                "",
+                tk.END,
+                values=(
+                    fila["Num"], fila["Fecha"], fila["Descripcion"],
+                    fila["Monto"], fila["Estado"],
+                ),
+            )
+        self._mostrar_estado_vacio(
+            self.tabla_depositos, "No hay depósitos registrados"
+        )
+
     def _cargar_reporte(self):
         try:
             fecha_corte = self._fin_de_mes(self.reporte_mes.get())
@@ -627,7 +722,8 @@ class ConciliadorApp(tk.Tk):
                 "",
                 tk.END,
                 values=(
-                    fila["Num"], fila["Fecha"], fila["Descripcion"], fila["Monto"]
+                    fila["Num"], fila["Fecha"], fila["Descripcion"],
+                    fila["Monto"], fila["Estado"],
                 ),
             )
         self._mostrar_estado_vacio(

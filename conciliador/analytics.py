@@ -216,12 +216,16 @@ def obtener_reporte_movimientos(fecha=None, cuenta_id=None):
     if not df_depositos_mes.empty:
         df_depositos_mes["Monto"] = df_depositos_mes["Monto_valor"].map(formatear_monto)
         total_depositos = sum(
-            (fila["Monto_valor"] for _, fila in df_depositos_mes.iterrows()),
+            (
+                fila["Monto_valor"]
+                for _, fila in df_depositos_mes.iterrows()
+                if str(fila["Estado"]).upper() != "ANULADO"
+            ),
             Decimal("0.00"),
         )
     else:
         df_depositos_mes = pd.DataFrame(
-            columns=["Num", "Fecha", "Descripcion", "Monto"]
+            columns=["Num", "Fecha", "Descripcion", "Monto", "Estado"]
         )
 
     saldo = total_depositos - total_cheques

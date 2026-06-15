@@ -22,7 +22,8 @@ BASE_TABLES = {
         "descripcion", "creado_en", "actualizado_en",
     },
     "depositos": {
-        "id", "cuenta_id", "fecha", "descripcion", "monto", "creado_en",
+        "id", "cuenta_id", "fecha", "descripcion", "monto", "estado",
+        "creado_en", "actualizado_en",
     },
     "auditoria": {
         "id", "fecha_hora", "accion", "entidad", "entidad_id", "detalle"
@@ -67,7 +68,10 @@ CREATE TABLE depositos (
     fecha TEXT NOT NULL,
     descripcion TEXT NOT NULL,
     monto TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'REGISTRADO'
+        CHECK (estado IN ('REGISTRADO', 'ANULADO')),
     creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (cuenta_id) REFERENCES cuentas_bancarias(id)
 );
 CREATE TABLE auditoria (
@@ -124,10 +128,28 @@ def _upgrade_2(connection):
             "ALTER TABLE depositos ADD COLUMN numero TEXT NOT NULL DEFAULT ''"
         )
 
+def _upgrade_3(connection):
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(depositos)")
+    }
+    if "estado" not in columns:
+        connection.execute(
+            "ALTER TABLE depositos ADD COLUMN estado TEXT NOT NULL "
+            "DEFAULT 'REGISTRADO' CHECK (estado IN ('REGISTRADO', 'ANULADO'))"
+        )
+    if "actualizado_en" not in columns:
+        connection.execute(
+            "ALTER TABLE depositos ADD COLUMN actualizado_en TEXT"
+        )
+        connection.execute(
+            "UPDATE depositos SET actualizado_en = COALESCE(creado_en, CURRENT_TIMESTAMP)"
+        )
+
 
 MIGRATIONS = (
     Migration(1, "esquema_inicial", _upgrade_1),
     Migration(2, "numero_deposito", _upgrade_2),
+    Migration(3, "estado_deposito", _upgrade_3),
 )
 LATEST_VERSION = MIGRATIONS[-1].version
 

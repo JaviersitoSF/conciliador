@@ -27,8 +27,14 @@ class ConciliadorService:
     def registrar_deposito(self, *args, **kwargs):
         return self.operations.registrar_deposito_datos(*args, **kwargs)
 
+    def anular_deposito(self, numero, cuenta_id=None):
+        return self.operations.anular_deposito_numero(numero, cuenta_id)
+
     def obtener_cheques(self, cuenta_id=None):
         return self.operations.cargar_cheques_registrados(cuenta_id)
+
+    def obtener_depositos(self, cuenta_id=None):
+        return self.operations.cargar_depositos_registrados(cuenta_id)
 
     def obtener_reporte(self, fecha=None, cuenta_id=None):
         return self.operations.obtener_reporte_movimientos(fecha, cuenta_id)

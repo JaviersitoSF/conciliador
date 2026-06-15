@@ -143,6 +143,10 @@ class SistemaBancarioTests(unittest.TestCase):
         main.registrar_deposito_datos(
             "100.00", "venta", fecha="2026-06-05", numero="10"
         )
+        main.registrar_deposito_datos(
+            "30.00", "deposito errado", fecha="2026-06-05", numero="11"
+        )
+        main.anular_deposito_numero("11")
 
         reporte = main.obtener_reporte_movimientos("2026-06-08")
 

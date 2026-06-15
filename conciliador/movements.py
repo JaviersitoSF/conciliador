@@ -55,7 +55,8 @@ def cargar_cheques_registrados(cuenta_id=None):
 
 def cargar_depositos_registrados(cuenta_id=None):
     columnas = [
-        "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion", "Monto"
+        "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion", "Monto",
+        "Estado",
     ]
     vacio = crear_dataframe_vacio(columnas)
 
@@ -64,7 +65,8 @@ def cargar_depositos_registrados(cuenta_id=None):
         consulta = """
             SELECT d.cuenta_id AS Cuenta_id, cb.banco AS Banco,
                    cb.nombre AS Cuenta, d.numero AS Num, d.fecha AS Fecha,
-                   d.descripcion AS Descripcion, d.monto AS Monto
+                   d.descripcion AS Descripcion, d.monto AS Monto,
+                   d.estado AS Estado
             FROM depositos d
             JOIN cuentas_bancarias cb ON cb.id = d.cuenta_id
         """
@@ -125,8 +127,8 @@ def registrar_deposito_datos(
         cursor = conexion.execute(
             """
             INSERT INTO depositos
-                (cuenta_id, numero, fecha, descripcion, monto)
-            VALUES (?, ?, ?, ?, ?)
+                (cuenta_id, numero, fecha, descripcion, monto, actualizado_en)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
             (
                 cuenta["id"], numero, fecha, descripcion,
@@ -150,6 +152,66 @@ def registrar_deposito_datos(
         "cuenta_id": cuenta["id"],
         "monto": monto,
         "mensaje": f"✅ Depósito de Q {formatear_monto(monto)} registrado con éxito.",
+    }
+
+def anular_deposito_numero(numero, cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    numero = str(numero or "").strip()
+    if not numero:
+        raise ErrorOperacion(
+            "⚠️ Error: el número de depósito no puede quedar vacío."
+        )
+
+    with transaccion() as conexion:
+        depositos = conexion.execute(
+            """
+            SELECT id, estado FROM depositos
+            WHERE cuenta_id = ? AND numero = ?
+            ORDER BY id
+            """,
+            (cuenta["id"], numero),
+        ).fetchall()
+        if not depositos:
+            total = conexion.execute(
+                "SELECT COUNT(*) FROM depositos WHERE cuenta_id = ?",
+                (cuenta["id"],),
+            ).fetchone()[0]
+            if total == 0:
+                raise ErrorOperacion("⚠️ No hay registro de depósitos aún.")
+            raise ErrorOperacion(
+                f"⚠️ El depósito {numero} no existe en los registros."
+            )
+        if len(depositos) > 1:
+            raise ErrorOperacion(
+                f"⚠️ Hay más de un depósito con el número {numero}; "
+                "no se puede determinar cuál anular."
+            )
+        deposito = depositos[0]
+        if deposito["estado"] == "ANULADO":
+            raise ErrorOperacion(f"⚠️ El depósito {numero} ya está anulado.")
+
+        conexion.execute(
+            """
+            UPDATE depositos
+            SET estado = 'ANULADO', actualizado_en = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (deposito["id"],),
+        )
+        registrar_auditoria(
+            conexion,
+            "ANULAR",
+            "DEPOSITO",
+            deposito["id"],
+            f"{cuenta['banco']} / {cuenta['nombre']}: depósito {numero} "
+            "cambiado a ANULADO.",
+        )
+    crear_respaldo_posterior()
+
+    return {
+        "numero": numero,
+        "cantidad": 1,
+        "mensaje": f"🚫 El depósito {numero} ha sido marcado como ANULADO.",
     }
 
 def guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_id=None):

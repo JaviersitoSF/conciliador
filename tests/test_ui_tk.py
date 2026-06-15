@@ -201,6 +201,7 @@ def test_refrescar_invalida_resultados_de_conciliacion_anteriores():
     app = SimpleNamespace(
         _cargar_selector_cuentas=Mock(),
         _cargar_cheques=Mock(),
+        _cargar_depositos=Mock(),
         _cargar_reporte=Mock(),
         _limpiar_conciliacion=Mock(),
     )
@@ -209,6 +210,7 @@ def test_refrescar_invalida_resultados_de_conciliacion_anteriores():
 
     app._cargar_selector_cuentas.assert_called_once_with()
     app._cargar_cheques.assert_called_once_with()
+    app._cargar_depositos.assert_called_once_with()
     app._cargar_reporte.assert_called_once_with()
     app._limpiar_conciliacion.assert_called_once_with()
 

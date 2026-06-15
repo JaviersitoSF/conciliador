@@ -72,7 +72,10 @@ def inicializar_db():
                 fecha TEXT NOT NULL,
                 descripcion TEXT NOT NULL,
                 monto TEXT NOT NULL,
+                estado TEXT NOT NULL DEFAULT 'REGISTRADO'
+                    CHECK (estado IN ('REGISTRADO', 'ANULADO')),
                 creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (cuenta_id) REFERENCES cuentas_bancarias(id)
             );
 
