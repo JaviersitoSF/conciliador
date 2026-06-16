@@ -85,6 +85,135 @@ def cargar_depositos_registrados(cuenta_id=None):
 
     return df
 
+
+def cargar_notas_debito_registradas(cuenta_id=None):
+    columnas = [
+        "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion",
+        "Monto", "Estado",
+    ]
+    vacio = crear_dataframe_vacio(columnas)
+
+    inicializar_db()
+    with conectar_db() as conexion:
+        consulta = """
+            SELECT n.id AS Id, n.cuenta_id AS Cuenta_id, cb.banco AS Banco,
+                   cb.nombre AS Cuenta, n.numero AS Num, n.fecha AS Fecha,
+                   n.descripcion AS Descripcion, n.monto AS Monto,
+                   n.estado AS Estado
+            FROM notas_debito n
+            JOIN cuentas_bancarias cb ON cb.id = n.cuenta_id
+        """
+        parametros = ()
+        if cuenta_id is not None:
+            consulta += " WHERE n.cuenta_id = ?"
+            parametros = (obtener_cuenta(cuenta_id)["id"],)
+        consulta += " ORDER BY n.id"
+        filas = conexion.execute(consulta, parametros).fetchall()
+    if not filas:
+        return vacio
+
+    df = pd.DataFrame([dict(fila) for fila in filas], columns=columnas)
+    df["Monto_valor"] = df["Monto"].map(convertir_monto)
+    df["Fecha_dt"] = pd.to_datetime(df["Fecha"], errors="coerce")
+    return df
+
+def registrar_nota_debito_datos(monto, descripcion, fecha=None, cuenta_id=None, numero=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    numero = str(numero or "").strip()
+    if not numero:
+        raise ErrorOperacion("⚠️ Error: el número de nota de débito no puede quedar vacío.")
+    monto = convertir_monto(monto)
+    if monto is None:
+        raise ErrorOperacion("⚠️ Error: Solo usar números y punto decimal.")
+    if monto <= 0:
+        raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
+    descripcion = str(descripcion or "").strip()
+    if not descripcion:
+        raise ErrorOperacion("⚠️ Error: el campo no puede quedar vacío.")
+    if fecha is None:
+        fecha = datetime.now().strftime("%Y-%m-%d")
+    fecha = normalizar_fecha(fecha)
+    descripcion = descripcion.upper()
+    with transaccion() as conexion:
+        cursor = conexion.execute(
+            """
+            INSERT INTO notas_debito
+                (cuenta_id, numero, fecha, descripcion, monto, actualizado_en)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (cuenta["id"], numero, fecha, descripcion, formatear_monto(monto)),
+        )
+        registrar_auditoria(conexion, "CREAR", "NOTA_DEBITO", cursor.lastrowid,
+            f"{cuenta['banco']} / {cuenta['nombre']}: nota de débito {numero} Q {formatear_monto(monto)}: {descripcion}")
+    crear_respaldo_posterior()
+    return {"fecha": fecha, "numero": numero, "descripcion": descripcion, "cuenta_id": cuenta["id"], "monto": monto,
+            "mensaje": f"✅ Nota de débito de Q {formatear_monto(monto)} registrada con éxito."}
+
+def actualizar_nota_debito(nota_id, numero, fecha, descripcion, monto, cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    try:
+        nota_id = int(nota_id)
+    except (TypeError, ValueError) as e:
+        raise ErrorOperacion("⚠️ Nota de débito inválida.") from e
+    numero = str(numero or "").strip()
+    if not numero:
+        raise ErrorOperacion("⚠️ Error: el número de nota de débito no puede quedar vacío.")
+    fecha = normalizar_fecha(fecha)
+    descripcion = str(descripcion or "").strip()
+    if not descripcion:
+        raise ErrorOperacion("⚠️ Error: el campo no puede quedar vacío.")
+    monto = convertir_monto(monto)
+    if monto is None:
+        raise ErrorOperacion("⚠️ Error: Solo usar números y punto decimal.")
+    if monto <= 0:
+        raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
+    descripcion = descripcion.upper()
+    with transaccion() as conexion:
+        nota = conexion.execute("SELECT estado FROM notas_debito WHERE id = ? AND cuenta_id = ?", (nota_id, cuenta["id"])).fetchone()
+        if nota is None:
+            raise ErrorOperacion("⚠️ La nota de débito no existe en esta cuenta.")
+        if nota["estado"] == "ANULADO":
+            raise ErrorOperacion("⚠️ Una nota de débito anulada no se puede editar.")
+        conexion.execute("""UPDATE notas_debito SET numero = ?, fecha = ?, descripcion = ?, monto = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?""",
+            (numero, fecha, descripcion, formatear_monto(monto), nota_id))
+        registrar_auditoria(conexion, "ACTUALIZAR", "NOTA_DEBITO", nota_id, f"{cuenta['banco']} / {cuenta['nombre']}: nota de débito {numero} actualizada")
+    crear_respaldo_posterior()
+    return {"id": nota_id, "mensaje": f"✅ Nota de débito {numero} actualizada."}
+
+def eliminar_nota_debito(nota_id, cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    try:
+        nota_id = int(nota_id)
+    except (TypeError, ValueError) as e:
+        raise ErrorOperacion("⚠️ Nota de débito inválida.") from e
+    with transaccion() as conexion:
+        nota = conexion.execute("SELECT numero, monto, descripcion FROM notas_debito WHERE id = ? AND cuenta_id = ?", (nota_id, cuenta["id"])).fetchone()
+        if nota is None:
+            raise ErrorOperacion("⚠️ La nota de débito no existe en esta cuenta.")
+        registrar_auditoria(conexion, "ELIMINAR", "NOTA_DEBITO", nota_id, f"{cuenta['banco']} / {cuenta['nombre']}: nota de débito {nota['numero']} eliminada")
+        conexion.execute("DELETE FROM notas_debito WHERE id = ? AND cuenta_id = ?", (nota_id, cuenta["id"]))
+    crear_respaldo_posterior()
+    return {"id": nota_id, "mensaje": f"✅ Nota de débito {nota['numero']} eliminada."}
+
+def anular_nota_debito_numero(numero, cuenta_id=None):
+    cuenta = obtener_cuenta(cuenta_id)
+    numero = str(numero or "").strip()
+    if not numero:
+        raise ErrorOperacion("⚠️ Error: el número de nota de débito no puede quedar vacío.")
+    with transaccion() as conexion:
+        notas = conexion.execute("SELECT id, estado FROM notas_debito WHERE cuenta_id = ? AND numero = ? ORDER BY id", (cuenta["id"], numero)).fetchall()
+        if not notas:
+            raise ErrorOperacion(f"⚠️ La nota de débito {numero} no existe en los registros.")
+        if len(notas) > 1:
+            raise ErrorOperacion(f"⚠️ Hay más de una nota de débito con el número {numero}; no se puede determinar cuál anular.")
+        nota = notas[0]
+        if nota["estado"] == "ANULADO":
+            raise ErrorOperacion(f"⚠️ La nota de débito {numero} ya está anulada.")
+        conexion.execute("UPDATE notas_debito SET estado = 'ANULADO', actualizado_en = CURRENT_TIMESTAMP WHERE id = ?", (nota["id"],))
+        registrar_auditoria(conexion, "ANULAR", "NOTA_DEBITO", nota["id"], f"{cuenta['banco']} / {cuenta['nombre']}: nota de débito {numero} cambiada a ANULADO.")
+    crear_respaldo_posterior()
+    return {"numero": numero, "cantidad": 1, "mensaje": f"🚫 La nota de débito {numero} ha sido marcada como ANULADO."}
+
 def cheque_ya_registrado(numero, cuenta_id=None):
     cuenta = obtener_cuenta(cuenta_id)
     numero = normalizar_numero_cheque(numero)

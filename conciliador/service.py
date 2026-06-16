@@ -42,11 +42,26 @@ class ConciliadorService:
     def anular_deposito(self, numero, cuenta_id=None):
         return self.operations.anular_deposito_numero(numero, cuenta_id)
 
+    def registrar_nota_debito(self, *args, **kwargs):
+        return self.operations.registrar_nota_debito_datos(*args, **kwargs)
+
+    def actualizar_nota_debito(self, *args, **kwargs):
+        return self.operations.actualizar_nota_debito(*args, **kwargs)
+
+    def eliminar_nota_debito(self, nota_id, cuenta_id=None):
+        return self.operations.eliminar_nota_debito(nota_id, cuenta_id)
+
+    def anular_nota_debito(self, numero, cuenta_id=None):
+        return self.operations.anular_nota_debito_numero(numero, cuenta_id)
+
     def obtener_cheques(self, cuenta_id=None):
         return self.operations.cargar_cheques_registrados(cuenta_id)
 
     def obtener_depositos(self, cuenta_id=None):
         return self.operations.cargar_depositos_registrados(cuenta_id)
+
+    def obtener_notas_debito(self, cuenta_id=None):
+        return self.operations.cargar_notas_debito_registradas(cuenta_id)
 
     def obtener_reporte(self, fecha=None, cuenta_id=None):
         return self.operations.obtener_reporte_movimientos(fecha, cuenta_id)

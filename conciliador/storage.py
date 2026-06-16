@@ -79,6 +79,20 @@ def inicializar_db():
                 FOREIGN KEY (cuenta_id) REFERENCES cuentas_bancarias(id)
             );
 
+            CREATE TABLE IF NOT EXISTS notas_debito (
+                id INTEGER PRIMARY KEY,
+                cuenta_id INTEGER NOT NULL,
+                numero TEXT NOT NULL DEFAULT '',
+                fecha TEXT NOT NULL,
+                descripcion TEXT NOT NULL,
+                monto TEXT NOT NULL,
+                estado TEXT NOT NULL DEFAULT 'REGISTRADO'
+                    CHECK (estado IN ('REGISTRADO', 'ANULADO')),
+                creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (cuenta_id) REFERENCES cuentas_bancarias(id)
+            );
+
             CREATE TABLE IF NOT EXISTS auditoria (
                 id INTEGER PRIMARY KEY,
                 fecha_hora TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

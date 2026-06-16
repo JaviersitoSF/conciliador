@@ -6,17 +6,22 @@ from .errors import ErrorOperacion
 from .movements import (
     actualizar_cheque,
     actualizar_deposito,
+    actualizar_nota_debito,
     anular_cheque_numero,
     anular_deposito_numero,
+    anular_nota_debito_numero,
     cargar_cheques_registrados,
     cargar_depositos_registrados,
+    cargar_notas_debito_registradas,
     cheque_ya_registrado,
     eliminar_cheque,
     eliminar_deposito,
+    eliminar_nota_debito,
     emitir_cheque_datos,
     formatear_monto,
     guardar_cheque_en_archivo,
     registrar_deposito_datos,
+    registrar_nota_debito_datos,
     reimprimir_cheque_numero,
 )
 from .printing import (

@@ -6,7 +6,7 @@ import pandas as pd
 
 from .domain import convertir_monto, normalizar_fecha, normalizar_numero_cheque
 from .errors import ErrorOperacion
-from .movements import cargar_cheques_registrados, cargar_depositos_registrados, formatear_monto
+from .movements import cargar_cheques_registrados, cargar_depositos_registrados, cargar_notas_debito_registradas, formatear_monto
 from .storage import obtener_cuenta
 
 ARCHIVO_BANCO = "estado_cuenta.xlsx"
@@ -193,6 +193,7 @@ def obtener_reporte_movimientos(fecha=None, cuenta_id=None):
     fecha = normalizar_fecha(fecha)
     periodo_actual = pd.Timestamp(fecha).to_period("M")
     total_cheques = Decimal("0.00")
+    total_notas_debito = Decimal("0.00")
     total_depositos = Decimal("0.00")
 
     cuenta = obtener_cuenta(cuenta_id) if cuenta_id is not None else None
@@ -228,14 +229,37 @@ def obtener_reporte_movimientos(fecha=None, cuenta_id=None):
             columns=["Num", "Fecha", "Descripcion", "Monto", "Estado"]
         )
 
-    saldo = total_depositos - total_cheques
+    df_notas_debito = cargar_notas_debito_registradas(cuenta_id)
+    df_notas_debito = df_notas_debito[df_notas_debito["Monto_valor"].notna() & df_notas_debito["Fecha_dt"].notna()].copy()
+    df_notas_debito_mes = df_notas_debito[df_notas_debito["Fecha_dt"].dt.to_period("M") == periodo_actual].copy()
+
+    if not df_notas_debito_mes.empty:
+        df_notas_debito_mes["Monto"] = df_notas_debito_mes["Monto_valor"].map(formatear_monto)
+        total_notas_debito = sum(
+            (
+                fila["Monto_valor"]
+                for _, fila in df_notas_debito_mes.iterrows()
+                if str(fila["Estado"]).upper() != "ANULADO"
+            ),
+            Decimal("0.00"),
+        )
+    else:
+        df_notas_debito_mes = pd.DataFrame(
+            columns=["Num", "Fecha", "Descripcion", "Monto", "Estado"]
+        )
+
+    total_egresos = total_cheques + total_notas_debito
+    saldo = total_depositos - total_egresos
 
     return {
         "periodo": str(periodo_actual),
         "cuenta": cuenta,
         "cheques": df_cheques_mes,
         "depositos": df_depositos_mes,
+        "notas_debito": df_notas_debito_mes,
         "total_cheques": total_cheques,
+        "total_notas_debito": total_notas_debito,
+        "total_egresos": total_egresos,
         "total_depositos": total_depositos,
         "saldo": saldo,
     }

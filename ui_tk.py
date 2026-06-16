@@ -63,16 +63,19 @@ class ConciliadorApp(tk.Tk):
 
         self.tab_cheques = ttk.Frame(self.notebook, padding=14)
         self.tab_depositos = ttk.Frame(self.notebook, padding=14)
+        self.tab_notas_debito = ttk.Frame(self.notebook, padding=14)
         self.tab_reporte = ttk.Frame(self.notebook, padding=14)
         self.tab_conciliacion = ttk.Frame(self.notebook, padding=14)
 
         self.notebook.add(self.tab_cheques, text="Cheques")
         self.notebook.add(self.tab_depositos, text="Depósitos")
+        self.notebook.add(self.tab_notas_debito, text="Notas de débito")
         self.notebook.add(self.tab_reporte, text="Corte de caja")
         self.notebook.add(self.tab_conciliacion, text="Conciliación")
 
         self._crear_cheques()
         self._crear_depositos()
+        self._crear_notas_debito()
         self._crear_reporte()
         self._crear_conciliacion()
 
@@ -220,6 +223,66 @@ class ConciliadorApp(tk.Tk):
             "<Double-1>", lambda _evento: self.editar_deposito()
         )
 
+    def _crear_notas_debito(self):
+        contenedor = ttk.Frame(self.tab_notas_debito)
+        contenedor.pack(fill="both", expand=True)
+        contenedor.columnconfigure((0, 1), weight=1, uniform="notas_debito")
+        contenedor.rowconfigure(0, weight=1)
+
+        controles = ttk.Frame(contenedor)
+        controles.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        controles.columnconfigure(0, weight=1)
+
+        nota = ttk.LabelFrame(controles, text="Registrar nota de débito", padding=14)
+        nota.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        self.nota_debito_num = self._campo(nota, "Número de nota de débito", 0)
+        self.nota_debito_desc = self._campo(nota, "Descripción", 1)
+        self.nota_debito_monto = self._campo(nota, "Monto", 2)
+        self.nota_debito_fecha = self._campo(nota, "Fecha (AAAA-MM-DD)", 3)
+        self.nota_debito_fecha.insert(0, date.today().isoformat())
+        self.boton_registrar_nota_debito = ttk.Button(
+            nota, text="Registrar nota de débito", command=self.registrar_nota_debito
+        )
+        self.boton_registrar_nota_debito.grid(
+            row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        )
+        self.nota_debito_monto.bind(
+            "<Return>", lambda _evento: self.registrar_nota_debito()
+        )
+
+        anular = ttk.LabelFrame(controles, text="Anular nota de débito", padding=14)
+        anular.grid(row=1, column=0, sticky="ew")
+        self.anular_nota_debito_num = self._campo(anular, "Número de nota de débito", 0)
+        self.boton_anular_nota_debito = ttk.Button(
+            anular, text="Marcar como anulado", command=self.anular_nota_debito
+        )
+        self.boton_anular_nota_debito.grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        )
+        self.anular_nota_debito_num.bind(
+            "<Return>", lambda _evento: self.anular_nota_debito()
+        )
+
+        historial = ttk.LabelFrame(contenedor, text="Notas de débito recientes", padding=10)
+        historial.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        historial.rowconfigure(0, weight=1)
+        historial.columnconfigure(0, weight=1)
+        self.tabla_notas_debito = self._tabla(
+            historial, ("Num", "Fecha", "Descripcion", "Monto", "Estado")
+        )
+        acciones = ttk.Frame(historial)
+        acciones.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        acciones.columnconfigure((0, 1), weight=1)
+        ttk.Button(
+            acciones, text="Editar seleccionado", command=self.editar_nota_debito
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(
+            acciones, text="Borrar seleccionado", command=self.eliminar_nota_debito
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        self.tabla_notas_debito.bind(
+            "<Double-1>", lambda _evento: self.editar_nota_debito()
+        )
+
     def _crear_reporte(self):
         acciones = ttk.Frame(self.tab_reporte)
         acciones.pack(fill="x", pady=(0, 12))
@@ -242,7 +305,7 @@ class ConciliadorApp(tk.Tk):
 
         cuerpo = ttk.Frame(self.tab_reporte)
         cuerpo.pack(fill="both", expand=True)
-        cuerpo.columnconfigure((0, 1), weight=1, uniform="report")
+        cuerpo.columnconfigure((0, 1, 2), weight=1, uniform="report")
         cuerpo.rowconfigure(0, weight=1)
 
         cheques = ttk.LabelFrame(cuerpo, text="Cheques del mes", padding=10)
@@ -252,11 +315,19 @@ class ConciliadorApp(tk.Tk):
         self.tabla_reporte_cheques = self._tabla(cheques, ("Num", "Fecha", "Nombre", "Monto", "Estado"))
 
         depositos = ttk.LabelFrame(cuerpo, text="Depósitos del mes", padding=10)
-        depositos.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        depositos.grid(row=0, column=1, sticky="nsew", padx=8)
         depositos.rowconfigure(0, weight=1)
         depositos.columnconfigure(0, weight=1)
         self.tabla_reporte_depositos = self._tabla(
             depositos, ("Numero", "Fecha", "Descripcion", "Monto", "Estado")
+        )
+
+        notas_debito = ttk.LabelFrame(cuerpo, text="Notas de débito del mes", padding=10)
+        notas_debito.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
+        notas_debito.rowconfigure(0, weight=1)
+        notas_debito.columnconfigure(0, weight=1)
+        self.tabla_reporte_notas_debito = self._tabla(
+            notas_debito, ("Numero", "Fecha", "Descripcion", "Monto", "Estado")
         )
 
     def _crear_conciliacion(self):
@@ -463,6 +534,31 @@ class ConciliadorApp(tk.Tk):
         self.refrescar_todo()
         messagebox.showinfo("Depósito registrado", resultado["mensaje"])
 
+    def registrar_nota_debito(self):
+        return self._ejecutar_bloqueado(
+            self.boton_registrar_nota_debito, self._registrar_nota_debito
+        )
+
+    def _registrar_nota_debito(self):
+        try:
+            resultado = service.registrar_nota_debito(
+                self.nota_debito_monto.get(),
+                self.nota_debito_desc.get(),
+                fecha=self.nota_debito_fecha.get(),
+                cuenta_id=self.cuenta_id_actual(),
+                numero=self.nota_debito_num.get(),
+            )
+        except Exception as e:
+            messagebox.showerror("No se pudo registrar", str(e))
+            return
+        self.nota_debito_num.delete(0, tk.END)
+        self.nota_debito_desc.delete(0, tk.END)
+        self.nota_debito_monto.delete(0, tk.END)
+        self.nota_debito_fecha.delete(0, tk.END)
+        self.nota_debito_fecha.insert(0, date.today().isoformat())
+        self.refrescar_todo()
+        messagebox.showinfo("Nota de débito registrada", resultado["mensaje"])
+
     def _movimiento_seleccionado(self, tabla, titulo):
         seleccion = tabla.selection()
         if not seleccion or "vacio" in tabla.item(seleccion[0], "tags"):
@@ -552,6 +648,31 @@ class ConciliadorApp(tk.Tk):
         messagebox.showinfo("Depósito actualizado", resultado["mensaje"])
         return True
 
+    def editar_nota_debito(self):
+        item = self._movimiento_seleccionado(self.tabla_notas_debito, "Editar nota de débito")
+        if item is None:
+            return
+        nota = self.notas_debito_por_id[int(item)]
+        DialogoMovimiento(
+            self,
+            "Editar nota de débito",
+            (("numero", "Número de nota de débito"), ("fecha", "Fecha (AAAA-MM-DD)"), ("descripcion", "Descripción"), ("monto", "Monto")),
+            nota,
+            lambda valores: self._actualizar_nota_debito(nota["id"], valores),
+        )
+
+    def _actualizar_nota_debito(self, nota_id, valores):
+        try:
+            resultado = service.actualizar_nota_debito(
+                nota_id, valores["numero"], valores["fecha"], valores["descripcion"], valores["monto"], self.cuenta_id_actual()
+            )
+        except Exception as e:
+            messagebox.showerror("No se pudo actualizar", str(e))
+            return False
+        self.refrescar_todo()
+        messagebox.showinfo("Nota de débito actualizada", resultado["mensaje"])
+        return True
+
     def eliminar_cheque(self):
         item = self._movimiento_seleccionado(
             self.tabla_cheques, "Borrar cheque"
@@ -603,6 +724,27 @@ class ConciliadorApp(tk.Tk):
             return
         self.refrescar_todo()
         messagebox.showinfo("Depósito eliminado", resultado["mensaje"])
+
+    def eliminar_nota_debito(self):
+        item = self._movimiento_seleccionado(self.tabla_notas_debito, "Borrar nota de débito")
+        if item is None:
+            return
+        nota = self.notas_debito_por_id[int(item)]
+        confirmar = messagebox.askyesno(
+            "Confirmar borrado",
+            f"¿Desea borrar permanentemente la nota de débito {nota['numero']} por Q {nota['monto']}?\n\nEsta acción no se puede deshacer.",
+            icon="warning",
+            parent=self,
+        )
+        if not confirmar:
+            return
+        try:
+            resultado = service.eliminar_nota_debito(nota["id"], self.cuenta_id_actual())
+        except Exception as e:
+            messagebox.showerror("No se pudo borrar", str(e))
+            return
+        self.refrescar_todo()
+        messagebox.showinfo("Nota de débito eliminada", resultado["mensaje"])
 
     def anular_cheque(self):
         numero = self.anular_num.get().strip()
@@ -674,6 +816,32 @@ class ConciliadorApp(tk.Tk):
         self.refrescar_todo()
         messagebox.showinfo("Depósito anulado", resultado["mensaje"])
 
+    def anular_nota_debito(self):
+        numero = self.anular_nota_debito_num.get().strip()
+        if not numero:
+            messagebox.showerror("No se pudo anular", "Ingrese el número de nota de débito que desea anular.", parent=self)
+            self.anular_nota_debito_num.focus_set()
+            return
+        confirmar = messagebox.askyesno(
+            "Confirmar anulación",
+            f"¿Desea marcar como anulada la nota de débito {numero}?\n\nEsta acción cambia su estado en el registro.",
+            icon="warning",
+            parent=self,
+        )
+        if not confirmar:
+            return
+        return self._ejecutar_bloqueado(self.boton_anular_nota_debito, self._anular_nota_debito)
+
+    def _anular_nota_debito(self):
+        try:
+            resultado = service.anular_nota_debito(self.anular_nota_debito_num.get(), self.cuenta_id_actual())
+        except Exception as e:
+            messagebox.showerror("No se pudo anular", str(e))
+            return
+        self.anular_nota_debito_num.delete(0, tk.END)
+        self.refrescar_todo()
+        messagebox.showinfo("Nota de débito anulada", resultado["mensaje"])
+
     def reimprimir_cheque(self):
         return self._ejecutar_bloqueado(
             self.boton_reimprimir_cheque, self._reimprimir_cheque
@@ -729,6 +897,7 @@ class ConciliadorApp(tk.Tk):
         self._cargar_selector_cuentas()
         self._cargar_cheques()
         self._cargar_depositos()
+        self._cargar_notas_debito()
         self._cargar_reporte()
         self._limpiar_conciliacion()
 
@@ -879,6 +1048,28 @@ class ConciliadorApp(tk.Tk):
             self.tabla_depositos, "No hay depósitos registrados"
         )
 
+    def _cargar_notas_debito(self):
+        self._limpiar_tabla(self.tabla_notas_debito)
+        df = service.obtener_notas_debito(self.cuenta_id_actual())
+        self.notas_debito_por_id = {}
+        if df.empty:
+            self._mostrar_estado_vacio(self.tabla_notas_debito, "No hay notas de débito registradas")
+            return
+        for _, fila in df.tail(30).iloc[::-1].iterrows():
+            nota_id = int(fila["Id"])
+            self.notas_debito_por_id[nota_id] = {
+                "id": nota_id,
+                "numero": fila["Num"],
+                "fecha": fila["Fecha"],
+                "descripcion": fila["Descripcion"],
+                "monto": fila["Monto"],
+            }
+            self.tabla_notas_debito.insert(
+                "", tk.END, iid=str(nota_id),
+                values=(fila["Num"], fila["Fecha"], fila["Descripcion"], fila["Monto"], fila["Estado"]),
+            )
+        self._mostrar_estado_vacio(self.tabla_notas_debito, "No hay notas de débito registradas")
+
     def _cargar_reporte(self):
         try:
             fecha_corte = self._fin_de_mes(self.reporte_mes.get())
@@ -889,7 +1080,7 @@ class ConciliadorApp(tk.Tk):
             messagebox.showerror("Corte de caja", str(e))
             return
         self.lbl_ingresos.configure(text=f"Ingresos: Q {core.formatear_monto(reporte['total_depositos'])}")
-        self.lbl_egresos.configure(text=f"Egresos: Q {core.formatear_monto(reporte['total_cheques'])}")
+        self.lbl_egresos.configure(text=f"Egresos: Q {core.formatear_monto(reporte.get('total_egresos', reporte['total_cheques']))}")
         self.lbl_saldo.configure(text=f"Saldo: Q {core.formatear_monto(reporte['saldo'])}")
 
         self._limpiar_tabla(self.tabla_reporte_cheques)
@@ -910,11 +1101,21 @@ class ConciliadorApp(tk.Tk):
                     fila["Monto"], fila["Estado"],
                 ),
             )
+        self._limpiar_tabla(self.tabla_reporte_notas_debito)
+        for _, fila in reporte["notas_debito"].iterrows():
+            self.tabla_reporte_notas_debito.insert(
+                "", tk.END,
+                values=(fila["Num"], fila["Fecha"], fila["Descripcion"], fila["Monto"], fila["Estado"]),
+            )
+
         self._mostrar_estado_vacio(
             self.tabla_reporte_cheques, "No hay cheques en el período"
         )
         self._mostrar_estado_vacio(
             self.tabla_reporte_depositos, "No hay depósitos en el período"
+        )
+        self._mostrar_estado_vacio(
+            self.tabla_reporte_notas_debito, "No hay notas de débito en el período"
         )
 
     def _limpiar_tabla(self, tabla):
