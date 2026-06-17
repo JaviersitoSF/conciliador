@@ -1,7 +1,9 @@
+import logging
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from .errors import ErrorPersistencia
 
@@ -10,7 +12,7 @@ from .errors import ErrorPersistencia
 class Migration:
     version: int
     name: str
-    upgrade: object
+    upgrade: Callable[[sqlite3.Connection], None]
 
 
 BASE_TABLES = {
@@ -216,7 +218,7 @@ def _backup(connection, backup_dir: Path, database: Path):
     return destination
 
 
-def migrate(connection, database, backup_dir, logger=None):
+def migrate(connection, database, backup_dir, logger: logging.Logger | None = None):
     database = Path(database)
     tables = _table_names(connection)
     has_user_schema = bool(tables - {"schema_migrations", "sqlite_sequence"})

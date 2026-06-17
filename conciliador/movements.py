@@ -10,6 +10,10 @@ from .storage import (conectar_db, crear_respaldo_posterior, inicializar_db,
     obtener_cuenta, obtener_formato_impresion, registrar_auditoria, transaccion)
 
 COLUMNAS_CHEQUES = ["Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Nombre", "Monto", "Estado", "Descripcion"]
+COLUMNAS_MOVIMIENTOS = [
+    "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion",
+    "Monto", "Estado",
+]
 
 def formatear_monto(valor):
     monto = convertir_monto(valor)
@@ -53,69 +57,41 @@ def cargar_cheques_registrados(cuenta_id=None):
 
     return df
 
-def cargar_depositos_registrados(cuenta_id=None):
-    columnas = [
-        "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion",
-        "Monto", "Estado",
-    ]
-    vacio = crear_dataframe_vacio(columnas)
+def _cargar_movimientos_registrados(tabla, alias, cuenta_id=None):
+    vacio = crear_dataframe_vacio(COLUMNAS_MOVIMIENTOS)
 
     inicializar_db()
     with conectar_db() as conexion:
-        consulta = """
-            SELECT d.id AS Id, d.cuenta_id AS Cuenta_id, cb.banco AS Banco,
-                   cb.nombre AS Cuenta, d.numero AS Num, d.fecha AS Fecha,
-                   d.descripcion AS Descripcion, d.monto AS Monto,
-                   d.estado AS Estado
-            FROM depositos d
-            JOIN cuentas_bancarias cb ON cb.id = d.cuenta_id
+        consulta = f"""
+            SELECT {alias}.id AS Id, {alias}.cuenta_id AS Cuenta_id,
+                   cb.banco AS Banco, cb.nombre AS Cuenta,
+                   {alias}.numero AS Num, {alias}.fecha AS Fecha,
+                   {alias}.descripcion AS Descripcion, {alias}.monto AS Monto,
+                   {alias}.estado AS Estado
+            FROM {tabla} {alias}
+            JOIN cuentas_bancarias cb ON cb.id = {alias}.cuenta_id
         """
         parametros = ()
         if cuenta_id is not None:
-            consulta += " WHERE d.cuenta_id = ?"
+            consulta += f" WHERE {alias}.cuenta_id = ?"
             parametros = (obtener_cuenta(cuenta_id)["id"],)
-        consulta += " ORDER BY d.id"
+        consulta += f" ORDER BY {alias}.id"
         filas = conexion.execute(consulta, parametros).fetchall()
     if not filas:
         return vacio
 
-    df = pd.DataFrame([dict(fila) for fila in filas], columns=columnas)
+    df = pd.DataFrame([dict(fila) for fila in filas], columns=COLUMNAS_MOVIMIENTOS)
     df["Monto_valor"] = df["Monto"].map(convertir_monto)
     df["Fecha_dt"] = pd.to_datetime(df["Fecha"], errors="coerce")
-
     return df
+
+
+def cargar_depositos_registrados(cuenta_id=None):
+    return _cargar_movimientos_registrados("depositos", "d", cuenta_id)
 
 
 def cargar_notas_debito_registradas(cuenta_id=None):
-    columnas = [
-        "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion",
-        "Monto", "Estado",
-    ]
-    vacio = crear_dataframe_vacio(columnas)
-
-    inicializar_db()
-    with conectar_db() as conexion:
-        consulta = """
-            SELECT n.id AS Id, n.cuenta_id AS Cuenta_id, cb.banco AS Banco,
-                   cb.nombre AS Cuenta, n.numero AS Num, n.fecha AS Fecha,
-                   n.descripcion AS Descripcion, n.monto AS Monto,
-                   n.estado AS Estado
-            FROM notas_debito n
-            JOIN cuentas_bancarias cb ON cb.id = n.cuenta_id
-        """
-        parametros = ()
-        if cuenta_id is not None:
-            consulta += " WHERE n.cuenta_id = ?"
-            parametros = (obtener_cuenta(cuenta_id)["id"],)
-        consulta += " ORDER BY n.id"
-        filas = conexion.execute(consulta, parametros).fetchall()
-    if not filas:
-        return vacio
-
-    df = pd.DataFrame([dict(fila) for fila in filas], columns=columnas)
-    df["Monto_valor"] = df["Monto"].map(convertir_monto)
-    df["Fecha_dt"] = pd.to_datetime(df["Fecha"], errors="coerce")
-    return df
+    return _cargar_movimientos_registrados("notas_debito", "n", cuenta_id)
 
 def registrar_nota_debito_datos(monto, descripcion, fecha=None, cuenta_id=None, numero=None):
     cuenta = obtener_cuenta(cuenta_id)
