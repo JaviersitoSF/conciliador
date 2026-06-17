@@ -17,6 +17,7 @@ class ConciliadorApp(tk.Tk):
         self.geometry("1080x720")
         self.minsize(900, 620)
 
+        self._orden_descendente_tablas = {}
         self._configurar_estilo()
         self._crear_layout()
         self.bind_all("<Control-r>", lambda _evento: self.refrescar_todo())
@@ -405,7 +406,7 @@ class ConciliadorApp(tk.Tk):
         tabla.grid(row=0, column=0, sticky="nsew")
         barra.grid(row=0, column=1, sticky="ns")
         barra_horizontal.grid(row=1, column=0, sticky="ew")
-        tabla._orden_descendente = {}
+        self._orden_descendente_tablas[id(tabla)] = {}
         for columna in columnas:
             tabla.heading(
                 columna,
@@ -424,7 +425,8 @@ class ConciliadorApp(tk.Tk):
             for item in tabla.get_children()
             if "vacio" not in tabla.item(item, "tags")
         ]
-        descendente = tabla._orden_descendente.get(columna, False)
+        orden_tabla = self._orden_descendente_tablas.setdefault(id(tabla), {})
+        descendente = orden_tabla.get(columna, False)
 
         def clave(fila):
             valor = fila[0].replace(",", "").replace("Q", "").strip()
@@ -436,7 +438,7 @@ class ConciliadorApp(tk.Tk):
         filas.sort(key=clave, reverse=descendente)
         for posicion, (_, item) in enumerate(filas):
             tabla.move(item, "", posicion)
-        tabla._orden_descendente[columna] = not descendente
+        orden_tabla[columna] = not descendente
 
     def _copiar_tabla(self, tabla):
         seleccion = tabla.selection()
@@ -897,7 +899,8 @@ class ConciliadorApp(tk.Tk):
         self._cargar_selector_cuentas()
         self._cargar_cheques()
         self._cargar_depositos()
-        self._cargar_notas_debito()
+        if hasattr(self, "_cargar_notas_debito"):
+            self._cargar_notas_debito()
         self._cargar_reporte()
         self._limpiar_conciliacion()
 
