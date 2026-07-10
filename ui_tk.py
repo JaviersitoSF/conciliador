@@ -900,6 +900,7 @@ class ConciliadorApp(tk.Tk):
             filetypes=[
                 ("Banco Industrial CSV", "*.csv"),
                 ("Banrural CSV", "*.csv"),
+                ("BAC CSV", "*.csv"),
                 ("G&T Continental XLS", "*.xls"),
             ],
         )

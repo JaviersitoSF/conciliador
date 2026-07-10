@@ -330,6 +330,94 @@ def _leer_csv_banrural(archivo):
     }
 
 
+def _leer_csv_bac(archivo):
+    """Convierte el CSV de detalle de estado bancario exportado por BAC."""
+    contenido = None
+    for codificacion in ("utf-8-sig", "latin-1"):
+        try:
+            contenido = Path(archivo).read_text(encoding=codificacion)
+            break
+        except UnicodeDecodeError:
+            continue
+    if contenido is None:
+        raise ErrorOperacion("⚠️ No se pudo reconocer la codificación del archivo de BAC.")
+
+    filas = list(csv.reader(contenido.splitlines()))
+    if len(filas) < 2:
+        raise ErrorOperacion("⚠️ El estado de BAC no contiene los datos de la cuenta.")
+
+    cabecera_cuenta = {
+        nombre.strip().casefold(): indice
+        for indice, nombre in enumerate(filas[0])
+    }
+    requeridas_cuenta = {"producto", "moneda", "fecha"}
+    if not requeridas_cuenta <= cabecera_cuenta.keys():
+        raise ErrorOperacion("⚠️ El estado de BAC no contiene los datos esperados de la cuenta.")
+    datos_cuenta = filas[1] + [""] * (len(filas[0]) - len(filas[1]))
+    cuenta_numero = datos_cuenta[cabecera_cuenta["producto"]].strip()
+    cuenta_nombre = datos_cuenta[cabecera_cuenta.get("nombre", 1)].strip()
+    moneda_bac = datos_cuenta[cabecera_cuenta["moneda"]].strip().upper()
+    fecha_fin = _fecha_bancaria(datos_cuenta[cabecera_cuenta["fecha"]])
+
+    indice_cabecera = None
+    for indice, fila in enumerate(filas):
+        nombres = {valor.strip().casefold() for valor in fila}
+        if {
+            "fecha de transacción", "referencia de transacción",
+            "código de transacción", "descripción de transacción",
+            "débito de transacción", "crédito de transacción",
+        } <= nombres:
+            indice_cabecera = indice
+            break
+    if indice_cabecera is None:
+        raise ErrorOperacion("⚠️ El estado de BAC no contiene la cabecera de movimientos.")
+
+    cabecera = [valor.strip().casefold() for valor in filas[indice_cabecera]]
+    columnas = {nombre: indice for indice, nombre in enumerate(cabecera)}
+    cheques, depositos, notas_debito = [], [], []
+    fechas = []
+    for fila in filas[indice_cabecera + 1:]:
+        fila += [""] * (len(cabecera) - len(fila))
+        fecha = fila[columnas["fecha de transacción"]].strip()
+        fecha_normalizada = _fecha_bancaria(fecha)
+        if fecha_normalizada is None:
+            continue
+        fechas.append(fecha_normalizada)
+        referencia = fila[columnas["referencia de transacción"]].strip()
+        codigo = fila[columnas["código de transacción"]].strip().upper()
+        descripcion = fila[columnas["descripción de transacción"]].strip()
+        debito = convertir_monto(fila[columnas["débito de transacción"]])
+        credito = convertir_monto(fila[columnas["crédito de transacción"]])
+        movimiento = {
+            "Num_cheque": referencia,
+            "fecha": fecha,
+            "descripcion": descripcion,
+        }
+        es_cheque = codigo in {"CH", "CQ", "CK"} or "CHEQUE" in descripcion.upper()
+        if debito is not None and debito != 0:
+            movimiento["Monto"] = abs(debito)
+            movimiento["tipo"] = "CQ" if es_cheque else "ND"
+            (cheques if es_cheque else notas_debito).append(movimiento)
+        elif credito is not None and credito != 0:
+            movimiento["Monto"] = abs(credito)
+            movimiento["tipo"] = "DP"
+            depositos.append(movimiento)
+
+    return {
+        "cheques": pd.DataFrame(
+            cheques, columns=["Num_cheque", "Monto", "fecha", "tipo", "descripcion"]
+        ),
+        "otros_cargos": [],
+        "depositos": depositos,
+        "notas_debito": notas_debito,
+        "cuenta_numero": cuenta_numero,
+        "cuenta_nombre": cuenta_nombre,
+        "fecha_inicio": min(fechas) if fechas else None,
+        "fecha_fin": fecha_fin or (max(fechas) if fechas else None),
+        "moneda": "GTQ" if moneda_bac in {"QTZ", "GTQ"} else moneda_bac,
+    }
+
+
 LECTORES_ESTADO_CUENTA = {
     "Banco Industrial": {
         ".csv": _leer_csv_banco_industrial,
@@ -339,6 +427,9 @@ LECTORES_ESTADO_CUENTA = {
     },
     "Banrural": {
         ".csv": _leer_csv_banrural,
+    },
+    "BAC": {
+        ".csv": _leer_csv_bac,
     },
 }
 
@@ -360,8 +451,8 @@ def _cuentas_coinciden(numero_archivo, numero_configurado):
 def _separar_movimientos_no_ingresados(locales, bancarios, fecha_inicio, fecha_corte):
     """Hace un cotejo uno-a-uno y devuelve movimientos sin contraparte.
 
-    Se prefiere documento+monto. Los registros históricos que no tienen número
-    todavía pueden conciliar por fecha+monto, sin reutilizar una fila bancaria.
+    Se prefiere documento+monto. Si el banco usa una referencia distinta de la
+    capturada localmente, se concilia por fecha+monto sin reutilizar una fila.
     """
     disponibles = []
     for movimiento in bancarios:
@@ -400,7 +491,7 @@ def _separar_movimientos_no_ingresados(locales, bancarios, fecha_inicio, fecha_c
             ),
             None,
         )
-        if indice is None and not numero:
+        if indice is None:
             indice = next(
                 (
                     i for i, banco in enumerate(disponibles)

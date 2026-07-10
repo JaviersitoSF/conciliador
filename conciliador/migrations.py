@@ -45,7 +45,7 @@ CREATE TABLE cuentas_bancarias (
     nombre TEXT NOT NULL,
     numero TEXT NOT NULL DEFAULT '',
     formato_conciliacion TEXT NOT NULL DEFAULT 'Banco Industrial'
-        CHECK (formato_conciliacion IN ('Banco Industrial', 'G&T Continental', 'Banrural')),
+        CHECK (formato_conciliacion IN ('Banco Industrial', 'G&T Continental', 'Banrural', 'BAC')),
     activa INTEGER NOT NULL DEFAULT 1 CHECK (activa IN (0, 1)),
     creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (banco, nombre, numero)
@@ -231,6 +231,48 @@ def _upgrade_6(connection):
     connection.execute("ALTER TABLE cuentas_bancarias_nueva RENAME TO cuentas_bancarias")
 
 
+def _upgrade_7(connection):
+    """Agrega BAC a los formatos permitidos por la cuenta."""
+    sql = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'cuentas_bancarias'"
+    ).fetchone()[0]
+    if "'BAC'" in sql:
+        connection.execute(
+            "UPDATE cuentas_bancarias SET formato_conciliacion = 'BAC' "
+            "WHERE UPPER(TRIM(banco)) = 'BAC'"
+        )
+        return
+    connection.execute(
+        """
+        CREATE TABLE cuentas_bancarias_nueva (
+            id INTEGER PRIMARY KEY,
+            banco TEXT NOT NULL,
+            nombre TEXT NOT NULL,
+            numero TEXT NOT NULL DEFAULT '',
+            formato_conciliacion TEXT NOT NULL DEFAULT 'Banco Industrial'
+                CHECK (formato_conciliacion IN ('Banco Industrial', 'G&T Continental', 'Banrural', 'BAC')),
+            activa INTEGER NOT NULL DEFAULT 1 CHECK (activa IN (0, 1)),
+            creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (banco, nombre, numero)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO cuentas_bancarias_nueva
+            (id, banco, nombre, numero, formato_conciliacion, activa, creada_en)
+        SELECT id, banco, nombre, numero, formato_conciliacion, activa, creada_en
+        FROM cuentas_bancarias
+        """
+    )
+    connection.execute("DROP TABLE cuentas_bancarias")
+    connection.execute("ALTER TABLE cuentas_bancarias_nueva RENAME TO cuentas_bancarias")
+    connection.execute(
+        "UPDATE cuentas_bancarias SET formato_conciliacion = 'BAC' "
+        "WHERE UPPER(TRIM(banco)) = 'BAC'"
+    )
+
+
 MIGRATIONS = (
     Migration(1, "esquema_inicial", _upgrade_1),
     Migration(2, "numero_deposito", _upgrade_2),
@@ -238,6 +280,7 @@ MIGRATIONS = (
     Migration(4, "formato_conciliacion_cuenta", _upgrade_4),
     Migration(5, "formato_conciliacion_gt_continental", _upgrade_5),
     Migration(6, "formato_conciliacion_banrural", _upgrade_6),
+    Migration(7, "formato_conciliacion_bac", _upgrade_7),
 )
 LATEST_VERSION = MIGRATIONS[-1].version
 
