@@ -856,14 +856,30 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 }
             )
 
-        depositos_no_ingresados, depositos_banco_sin_registro = (
+        # BI reporta varios abonos que corresponden a depósitos locales como
+        # notas de crédito (NC). Se cotejan junto con DE/DP; únicamente las NC
+        # sin contraparte local conservan su clasificación contable.
+        abonos_bancarios = (
+            estado_banco["depositos"] + estado_banco.get("notas_credito", [])
+        )
+        depositos_no_ingresados, abonos_banco_sin_registro = (
             _separar_movimientos_no_ingresados(
                 cargar_depositos_registrados(cuenta["id"]),
-                estado_banco["depositos"],
+                abonos_bancarios,
                 estado_banco["fecha_inicio"],
                 fecha_corte,
             )
         )
+        depositos_banco_sin_registro = [
+            movimiento
+            for movimiento in abonos_banco_sin_registro
+            if movimiento.get("tipo") != "NC"
+        ]
+        notas_credito_sin_deposito = [
+            movimiento
+            for movimiento in abonos_banco_sin_registro
+            if movimiento.get("tipo") == "NC"
+        ]
         notas_locales_sin_banco, notas_debito_no_ingresadas = (
             _separar_movimientos_no_ingresados(
                 cargar_notas_debito_registradas(cuenta["id"]),
@@ -897,7 +913,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 "descripcion": movimiento["descripcion"] or "Sin descripción",
                 "monto": movimiento["Monto"],
             }
-            for movimiento in estado_banco.get("notas_credito", [])
+            for movimiento in notas_credito_sin_deposito
         ]
         for fila in depositos_no_ingresados:
             fila["diferencia"] = "Pendiente en banco"

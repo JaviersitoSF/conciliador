@@ -287,6 +287,29 @@ def test_lector_bi_tolera_comas_sin_comillas_en_descripcion():
     assert nota_credito["monto"] == Decimal("30000.00")
 
 
+def test_conciliacion_bi_coteja_notas_credito_con_depositos_por_numero_y_monto():
+    cuenta_id = main.crear_cuenta_bancaria(
+        "BANCO INDUSTRIAL", "Monetaria", "0480003228"
+    )
+    main.registrar_deposito_datos(
+        "140", "PAMELA REC. 1363 05/6/2026",
+        fecha="2026-06-03", numero="258637", cuenta_id=cuenta_id,
+    )
+    crear_estado_bi(
+        "estado.csv",
+        filas=[
+            "03-06-2026,NC,ACH GUSTAVO ADOLFO MENDEZ,258637,,140.00,76493.54",
+            "04-06-2026,NC,CRÉDITO SIN DEPÓSITO,999999,,25.00,76518.54",
+        ],
+    )
+
+    resultado = main.obtener_conciliacion(cuenta_id, "estado.csv", "2026-06-30")
+
+    assert resultado["depositos_no_ingresados"] == []
+    assert resultado["depositos_banco_sin_registro"] == []
+    assert [fila["num"] for fila in resultado["notas_credito_banco"]] == ["999999"]
+
+
 def test_abrir_pdf_propaga_detalle_del_comando():
     error = subprocess.CalledProcessError(
         1, ["lp", "cheque.pdf"], stderr="impresora no disponible"

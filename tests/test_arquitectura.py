@@ -5,7 +5,7 @@ import pytest
 
 from conciliador.database import Database
 from conciliador.errors import ErrorPersistencia
-from conciliador.migrations import LATEST_VERSION, SCHEMA_SQL, migrate
+from conciliador.migrations import LATEST_VERSION, MIGRATIONS, SCHEMA_SQL, migrate
 from conciliador.paths import AppPaths
 from conciliador import printing
 
@@ -73,6 +73,41 @@ def test_migracion_agrega_formato_de_conciliacion_a_cuentas_existentes(tmp_path)
         ).fetchone()[0]
 
     assert formato == "Banco Industrial"
+
+
+def test_migracion_bac_conserva_relaciones_existentes(tmp_path):
+    paths = AppPaths.portable(tmp_path)
+    paths.ensure_directories()
+    connection = sqlite3.connect(paths.database)
+    try:
+        connection.execute(
+            "CREATE TABLE schema_migrations ("
+            "version INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+            "applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+        for migration in MIGRATIONS[:6]:
+            migration.upgrade(connection)
+            connection.execute(
+                "INSERT INTO schema_migrations(version, name) VALUES (?, ?)",
+                (migration.version, migration.name),
+            )
+        connection.execute(
+            "INSERT INTO cheques "
+            "(cuenta_id, numero, fecha, nombre, monto) "
+            "VALUES (1, '100', '2026-07-10', 'Proveedor', '10.00')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    assert Database(paths).initialize() == LATEST_VERSION
+
+    with Database(paths).connect() as connection:
+        cheque = connection.execute(
+            "SELECT cuenta_id, numero FROM cheques WHERE numero = '100'"
+        ).fetchone()
+        assert tuple(cheque) == (1, "100")
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
 def test_conexion_aplica_pragmas(tmp_path):

@@ -391,7 +391,7 @@ def migrate(connection, database, backup_dir, logger: logging.Logger | None = No
 
     _check_integrity(connection)
     backup = _backup(connection, Path(backup_dir), database) if database.exists() else None
-    reconstruye_cuentas = any(migration.version in {5, 6} for migration in pending)
+    reconstruye_cuentas = any(migration.version in {5, 6, 7} for migration in pending)
     if reconstruye_cuentas:
         connection.execute("PRAGMA foreign_keys = OFF")
     try:
