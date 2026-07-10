@@ -448,19 +448,30 @@ def _cuentas_coinciden(numero_archivo, numero_configurado):
     return archivo == configurado
 
 
+VENTANA_CONCILIACION_MOVIMIENTOS_DIAS = 7
+
+
 def _separar_movimientos_no_ingresados(locales, bancarios, fecha_inicio, fecha_corte):
     """Hace un cotejo uno-a-uno y devuelve movimientos sin contraparte.
 
-    Se prefiere documento+monto. Si el banco usa una referencia distinta de la
-    capturada localmente, se concilia por fecha+monto sin reutilizar una fila.
+    Primero se reserva cada coincidencia de documento+monto. Para referencias
+    distintas se usa monto+fecha dentro de una ventana inclusiva de siete días,
+    pero solo cuando la relación es única en ambos sentidos. Ninguna fila se
+    reutiliza y las coincidencias ambiguas permanecen como diferencias.
     """
-    disponibles = []
+    bancarios_preparados = []
     for movimiento in bancarios:
-        disponibles.append(
+        fecha_norm = _fecha_bancaria(movimiento["fecha"])
+        bancarios_preparados.append(
             {
                 **movimiento,
                 "numero_norm": normalizar_numero_cheque(movimiento["Num_cheque"]),
-                "fecha_norm": _fecha_bancaria(movimiento["fecha"]),
+                "fecha_norm": fecha_norm,
+                "fecha_dt": (
+                    datetime.fromisoformat(fecha_norm).date()
+                    if fecha_norm is not None
+                    else None
+                ),
             }
         )
 
@@ -479,27 +490,75 @@ def _separar_movimientos_no_ingresados(locales, bancarios, fecha_inicio, fecha_c
         locales_vigentes["Estado"].astype(str).str.upper() != "ANULADO"
     ]
 
-    sin_ingresar = []
-    for _, local in locales_vigentes.iterrows():
+    locales_preparados = list(locales_vigentes.iterrows())
+    indices_bancarios_disponibles = set(range(len(bancarios_preparados)))
+    indices_locales_con_match = set()
+
+    # Las referencias exactas tienen prioridad global sobre la ventana de
+    # fechas. Así, una fila flexible anterior no puede consumir la contraparte
+    # exacta de otro movimiento local.
+    for indice_local, (_, local) in enumerate(locales_preparados):
         monto = local["Monto_valor"]
         numero = normalizar_numero_cheque(local["Num"])
-        fecha = None if pd.isna(local["Fecha_dt"]) else local["Fecha_dt"].date().isoformat()
-        indice = next(
+        indice_bancario = next(
             (
-                i for i, banco in enumerate(disponibles)
-                if numero and banco["numero_norm"] == numero and banco["Monto"] == monto
+                indice
+                for indice in sorted(indices_bancarios_disponibles)
+                if numero
+                and bancarios_preparados[indice]["numero_norm"] == numero
+                and bancarios_preparados[indice]["Monto"] == monto
             ),
             None,
         )
-        if indice is None:
-            indice = next(
-                (
-                    i for i, banco in enumerate(disponibles)
-                    if banco["Monto"] == monto and banco["fecha_norm"] == fecha
-                ),
-                None,
+        if indice_bancario is not None:
+            indices_locales_con_match.add(indice_local)
+            indices_bancarios_disponibles.remove(indice_bancario)
+
+    candidatos_por_local = {}
+    locales_por_bancario = {
+        indice: [] for indice in indices_bancarios_disponibles
+    }
+    for indice_local, (_, local) in enumerate(locales_preparados):
+        if indice_local in indices_locales_con_match:
+            continue
+
+        monto = local["Monto_valor"]
+        fecha_local = (
+            None if pd.isna(local["Fecha_dt"]) else local["Fecha_dt"].date()
+        )
+        candidatos = []
+        if monto is not None and fecha_local is not None:
+            for indice_bancario in sorted(indices_bancarios_disponibles):
+                banco = bancarios_preparados[indice_bancario]
+                fecha_banco = banco["fecha_dt"]
+                if (
+                    banco["Monto"] == monto
+                    and fecha_banco is not None
+                    and abs((fecha_banco - fecha_local).days)
+                    <= VENTANA_CONCILIACION_MOVIMIENTOS_DIAS
+                ):
+                    candidatos.append(indice_bancario)
+                    locales_por_bancario[indice_bancario].append(indice_local)
+        candidatos_por_local[indice_local] = candidatos
+
+    for indice_local, candidatos in candidatos_por_local.items():
+        if len(candidatos) != 1:
+            continue
+        indice_bancario = candidatos[0]
+        if len(locales_por_bancario[indice_bancario]) != 1:
+            continue
+        indices_locales_con_match.add(indice_local)
+        indices_bancarios_disponibles.remove(indice_bancario)
+
+    sin_ingresar = []
+    for indice_local, (_, local) in enumerate(locales_preparados):
+        if indice_local not in indices_locales_con_match:
+            fecha = (
+                None
+                if pd.isna(local["Fecha_dt"])
+                else local["Fecha_dt"].date().isoformat()
             )
-        if indice is None:
+            monto = local["Monto_valor"]
             sin_ingresar.append(
                 {
                     "num": str(local["Num"] or "S/N"),
@@ -508,8 +567,11 @@ def _separar_movimientos_no_ingresados(locales, bancarios, fecha_inicio, fecha_c
                     "monto": monto,
                 }
             )
-        else:
-            disponibles.pop(indice)
+    disponibles = [
+        movimiento
+        for indice, movimiento in enumerate(bancarios_preparados)
+        if indice in indices_bancarios_disponibles
+    ]
     return sin_ingresar, disponibles
 
 
