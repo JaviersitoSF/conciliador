@@ -29,6 +29,8 @@ def test_lector_bac_clasifica_movimientos_y_metadatos(tmp_path):
     assert estado["fecha_inicio"] == "2026-06-01"
     assert estado["fecha_fin"] == "2026-06-30"
     assert estado["moneda"] == "GTQ"
+    assert estado["saldo_inicial"] == Decimal("100.00")
+    assert estado["saldo_final"] == Decimal("125.00")
     assert estado["depositos"][0]["Monto"] == Decimal("50.00")
     assert estado["notas_debito"][0]["Monto"] == Decimal("20.00")
     assert estado["cheques"].iloc[0]["Num_cheque"] == "1466"

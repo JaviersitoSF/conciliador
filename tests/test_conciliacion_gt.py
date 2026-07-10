@@ -30,6 +30,8 @@ def test_lector_gt_clasifica_cheques_depositos_y_notas(monkeypatch):
     assert estado["cuenta_numero"] == "08050003210"
     assert estado["fecha_inicio"] == "2026-06-01"
     assert estado["fecha_fin"] == "2026-06-30"
+    assert estado["saldo_inicial"] is None
+    assert estado["saldo_final"] == Decimal("124.72")
     assert estado["cheques"].iloc[0]["Num_cheque"] == "93808165"
     assert estado["cheques"].iloc[0]["Monto"] == Decimal("4919.06")
     assert estado["depositos"][0]["Monto"] == Decimal("25.00")

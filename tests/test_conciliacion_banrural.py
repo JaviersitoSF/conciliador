@@ -30,6 +30,8 @@ def test_lector_banrural_clasifica_movimientos_y_metadatos(tmp_path):
     assert estado["fecha_inicio"] == "2026-06-01"
     assert estado["fecha_fin"] == "2026-06-30"
     assert estado["moneda"] == "GTQ"
+    assert estado["saldo_inicial"] is None
+    assert estado["saldo_final"] == Decimal("0.00")
     assert estado["cheques"].iloc[0]["Num_cheque"] == "1234"
     assert estado["cheques"].iloc[0]["Monto"] == Decimal("2550.00")
     assert estado["depositos"][0]["Num_cheque"] == "49518610"

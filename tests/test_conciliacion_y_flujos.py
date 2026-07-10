@@ -176,6 +176,8 @@ def test_conciliacion_lee_csv_banco_industrial_y_separa_otros_cargos():
         "fecha_inicio": "2026-06-01",
         "fecha_fin": "2026-06-30",
         "moneda": "GTQ",
+        "saldo_inicial": Decimal("1430.10"),
+        "saldo_final": Decimal("1074.50"),
     }
     assert [fila["resultado"] for fila in resultado["no_registrados"]] == [
         "CARGO_BANCO"
@@ -246,6 +248,8 @@ def test_conciliacion_presenta_las_cuatro_categorias_contables():
 
     assert [fila["num"] for fila in resultado["cheques_cobrados"]] == ["1"]
     assert [fila["num"] for fila in resultado["cheques_transito"]] == ["2"]
+    assert resultado["cheques_transito"][0]["fecha"] == "2026-06-02"
+    assert resultado["cheques_transito"][0]["nombre"] == "Pendiente"
     assert [fila["num"] for fila in resultado["depositos_no_ingresados"]] == ["D-1"]
     assert [fila["num"] for fila in resultado["notas_debito_no_ingresadas"]] == ["N-2"]
     assert [fila["num"] for fila in resultado["depositos_banco_sin_registro"]] == ["D-3"]
@@ -276,6 +280,11 @@ def test_lector_bi_tolera_comas_sin_comillas_en_descripcion():
 
     assert resultado["cheques"] == []
     assert resultado["no_registrados"] == []
+    nota_credito = resultado["notas_credito_banco"][0]
+    assert nota_credito["num"] == "297472"
+    assert nota_credito["fecha"] == "2026-06-30"
+    assert " ".join(nota_credito["descripcion"].split()) == "ACH BENISA, S.A. A"
+    assert nota_credito["monto"] == Decimal("30000.00")
 
 
 def test_abrir_pdf_propaga_detalle_del_comando():

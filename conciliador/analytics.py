@@ -62,6 +62,8 @@ def _leer_csv_banco_industrial(archivo):
     fecha_inicio = None
     fecha_fin = None
     moneda = None
+    saldo_inicial = None
+    saldo_final = None
     indice_cabecera = None
 
     for indice, fila in enumerate(filas):
@@ -81,6 +83,10 @@ def _leer_csv_banco_industrial(archivo):
                 .date()
                 .isoformat()
             )
+        if primera.casefold().startswith("saldo inicial"):
+            _etiqueta, separador, valor = primera.partition(":")
+            if separador:
+                saldo_inicial = convertir_monto(valor)
         if primera.lower() == "fecha":
             indice_cabecera = indice
             moneda_en_cabecera = PATRON_MONEDA_BI.search(",".join(fila))
@@ -105,6 +111,7 @@ def _leer_csv_banco_industrial(archivo):
 
     cheques = []
     depositos = []
+    notas_credito = []
     notas_debito = []
     otros_cargos = []
     for fila in filas[indice_cabecera + 1:]:
@@ -117,6 +124,9 @@ def _leer_csv_banco_industrial(archivo):
         tipo = fila[columnas["tt"]].strip().upper()
         debe_original = fila[columnas["debe"]].strip()
         haber_original = fila[columnas["haber"]].strip()
+        saldo_fila = convertir_monto(fila[columnas["saldo"]].strip())
+        if saldo_fila is not None:
+            saldo_final = saldo_fila
         if not debe_original and not haber_original:
             continue
         monto = convertir_monto(debe_original or haber_original)
@@ -133,6 +143,8 @@ def _leer_csv_banco_industrial(archivo):
             cheques.append(movimiento)
         elif tipo in {"DE", "DP"}:
             depositos.append(movimiento)
+        elif tipo == "NC":
+            notas_credito.append(movimiento)
         elif tipo == "ND":
             notas_debito.append(movimiento)
         elif debe_original:
@@ -145,12 +157,15 @@ def _leer_csv_banco_industrial(archivo):
         ),
         "otros_cargos": otros_cargos,
         "depositos": depositos,
+        "notas_credito": notas_credito,
         "notas_debito": notas_debito,
         "cuenta_numero": cuenta_numero,
         "cuenta_nombre": cuenta_nombre,
         "fecha_inicio": fecha_inicio,
         "fecha_fin": fecha_fin,
         "moneda": moneda or "GTQ",
+        "saldo_inicial": saldo_inicial,
+        "saldo_final": saldo_final,
     }
 
 
@@ -162,6 +177,8 @@ def _leer_xls_gt_continental(archivo):
     fecha_inicio = None
     fecha_fin = None
     moneda = "GTQ"
+    saldo_inicial = None
+    saldo_final = None
     indice_cabecera = None
 
     for indice, fila in tabla.iterrows():
@@ -179,6 +196,8 @@ def _leer_xls_gt_continental(archivo):
                 fecha_inicio = _fecha_bancaria(siguiente)
             elif etiqueta == "fecha final":
                 fecha_fin = _fecha_bancaria(siguiente)
+            elif etiqueta == "saldo inicial":
+                saldo_inicial = convertir_monto(siguiente)
         if "monetario (usd)" in " ".join(valores).casefold():
             moneda = "USD"
         normalizados = {valor.casefold() for valor in valores}
@@ -193,6 +212,7 @@ def _leer_xls_gt_continental(archivo):
 
     cabecera = [_texto_celda(valor).casefold() for valor in tabla.iloc[indice_cabecera]]
     columnas = {nombre: indice for indice, nombre in enumerate(cabecera) if nombre}
+    indice_saldo = columnas.get("saldo")
     cheques = []
     depositos = []
     notas_debito = []
@@ -202,6 +222,13 @@ def _leer_xls_gt_continental(archivo):
         descripcion = _texto_celda(fila.iloc[columnas["descripción"]])
         debito = convertir_monto(fila.iloc[columnas["débito"]])
         credito = convertir_monto(fila.iloc[columnas["crédito"]])
+        saldo_fila = (
+            convertir_monto(fila.iloc[indice_saldo])
+            if indice_saldo is not None
+            else None
+        )
+        if saldo_fila is not None:
+            saldo_final = saldo_fila
         if not fecha or (debito is None and credito is None):
             continue
         descripcion_norm = descripcion.casefold()
@@ -231,12 +258,15 @@ def _leer_xls_gt_continental(archivo):
         ),
         "otros_cargos": [],
         "depositos": depositos,
+        "notas_credito": [],
         "notas_debito": notas_debito,
         "cuenta_numero": cuenta_numero,
         "cuenta_nombre": cuenta_nombre,
         "fecha_inicio": fecha_inicio,
         "fecha_fin": fecha_fin,
         "moneda": moneda,
+        "saldo_inicial": saldo_inicial,
+        "saldo_final": saldo_final,
     }
 
 
@@ -256,6 +286,7 @@ def _leer_csv_banrural(archivo):
 
     filas = list(csv.reader(contenido.splitlines()))
     cuenta_numero = cuenta_nombre = fecha_inicio = fecha_fin = moneda = None
+    saldo_final = None
     indice_cabecera = None
     for indice, fila in enumerate(filas):
         primera = str(fila[0] if fila else "").strip()
@@ -292,6 +323,11 @@ def _leer_csv_banrural(archivo):
         fecha = fila[columnas["fecha"]].strip()
         if not fecha or _fecha_bancaria(fecha) is None:
             continue
+        indice_saldo = columnas.get("saldo contable")
+        if indice_saldo is not None:
+            saldo_fila = convertir_monto(fila[indice_saldo])
+            if saldo_fila is not None:
+                saldo_final = saldo_fila
         descripcion = fila[columnas["descripción"]].strip()
         referencia = fila[columnas["referencia"]].strip()
         cheque = fila[columnas["cheque propio / local / efectivo"]].strip()
@@ -321,12 +357,15 @@ def _leer_csv_banrural(archivo):
         ),
         "otros_cargos": [],
         "depositos": depositos,
+        "notas_credito": [],
         "notas_debito": notas_debito,
         "cuenta_numero": cuenta_numero,
         "cuenta_nombre": cuenta_nombre,
         "fecha_inicio": fecha_inicio,
         "fecha_fin": fecha_fin,
         "moneda": (moneda or "GTQ").upper(),
+        "saldo_inicial": None,
+        "saldo_final": saldo_final,
     }
 
 
@@ -358,6 +397,19 @@ def _leer_csv_bac(archivo):
     cuenta_nombre = datos_cuenta[cabecera_cuenta.get("nombre", 1)].strip()
     moneda_bac = datos_cuenta[cabecera_cuenta["moneda"]].strip().upper()
     fecha_fin = _fecha_bancaria(datos_cuenta[cabecera_cuenta["fecha"]])
+    indice_saldo_inicial = cabecera_cuenta.get("saldo inicial")
+    saldo_inicial = (
+        convertir_monto(datos_cuenta[indice_saldo_inicial])
+        if indice_saldo_inicial is not None
+        else None
+    )
+    indice_saldo_final = cabecera_cuenta.get("saldo en libros")
+    saldo_final = (
+        convertir_monto(datos_cuenta[indice_saldo_final])
+        if indice_saldo_final is not None
+        else None
+    )
+    saldo_final_movimientos = None
 
     indice_cabecera = None
     for indice, fila in enumerate(filas):
@@ -388,6 +440,14 @@ def _leer_csv_bac(archivo):
         descripcion = fila[columnas["descripción de transacción"]].strip()
         debito = convertir_monto(fila[columnas["débito de transacción"]])
         credito = convertir_monto(fila[columnas["crédito de transacción"]])
+        indice_balance = columnas.get("balance de transacción")
+        saldo_movimiento = (
+            convertir_monto(fila[indice_balance])
+            if indice_balance is not None
+            else None
+        )
+        if saldo_movimiento is not None:
+            saldo_final_movimientos = saldo_movimiento
         movimiento = {
             "Num_cheque": referencia,
             "fecha": fecha,
@@ -409,12 +469,15 @@ def _leer_csv_bac(archivo):
         ),
         "otros_cargos": [],
         "depositos": depositos,
+        "notas_credito": [],
         "notas_debito": notas_debito,
         "cuenta_numero": cuenta_numero,
         "cuenta_nombre": cuenta_nombre,
         "fecha_inicio": min(fechas) if fechas else None,
         "fecha_fin": fecha_fin or (max(fechas) if fechas else None),
         "moneda": "GTQ" if moneda_bac in {"QTZ", "GTQ"} else moneda_bac,
+        "saldo_inicial": saldo_inicial,
+        "saldo_final": saldo_final if saldo_final is not None else saldo_final_movimientos,
     }
 
 
@@ -721,6 +784,17 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 }
             )
 
+        detalles_cheques = {
+            fila["Num_norm"]: {
+                "fecha": _texto_celda(fila.get("Fecha", "")),
+                "nombre": _texto_celda(fila.get("Nombre", "")),
+            }
+            for _, fila in df_nuestro.iterrows()
+            if fila.get("Num_norm")
+        }
+        for cheque in cheques:
+            cheque.update(detalles_cheques.get(cheque["num"], {}))
+
         no_registrados = []
         lista_nuestros_nums = set(df_nuestro["Num_norm"].dropna().tolist())
         for _, fila_banco in df_banco.iterrows():
@@ -816,6 +890,15 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             }
             for movimiento in depositos_banco_sin_registro
         ]
+        notas_credito_banco = [
+            {
+                "num": movimiento["Num_cheque"] or "S/N",
+                "fecha": _fecha_bancaria(movimiento["fecha"]) or "N/D",
+                "descripcion": movimiento["descripcion"] or "Sin descripción",
+                "monto": movimiento["Monto"],
+            }
+            for movimiento in estado_banco.get("notas_credito", [])
+        ]
         for fila in depositos_no_ingresados:
             fila["diferencia"] = "Pendiente en banco"
         for fila in depositos_banco_sin_registro:
@@ -870,6 +953,8 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 "fecha_inicio": estado_banco["fecha_inicio"],
                 "fecha_fin": estado_banco["fecha_fin"],
                 "moneda": moneda,
+                "saldo_inicial": estado_banco.get("saldo_inicial"),
+                "saldo_final": estado_banco.get("saldo_final"),
             },
             "cheques": cheques,
             "no_registrados": no_registrados,
@@ -878,6 +963,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             "depositos_no_ingresados": depositos_no_ingresados,
             "notas_debito_no_ingresadas": notas_debito_no_ingresadas,
             "depositos_banco_sin_registro": depositos_banco_sin_registro,
+            "notas_credito_banco": notas_credito_banco,
             "notas_debito_locales_sin_banco": notas_locales_sin_banco,
             "diferencias_depositos": diferencias_depositos,
             "diferencias_notas_debito": diferencias_notas_debito,
@@ -885,7 +971,10 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 "cheques_cobrados": resumen(cheques_cobrados),
                 "cheques_transito": resumen(cheques_transito),
                 "depositos_no_ingresados": resumen(depositos_no_ingresados),
+                "depositos_banco_sin_registro": resumen(depositos_banco_sin_registro),
+                "notas_credito_banco": resumen(notas_credito_banco),
                 "notas_debito_no_ingresadas": resumen(notas_debito_no_ingresadas),
+                "notas_debito_locales_sin_banco": resumen(notas_locales_sin_banco),
                 "diferencias_depositos": resumen(diferencias_depositos),
                 "diferencias_notas_debito": resumen(diferencias_notas_debito),
             },
