@@ -80,6 +80,21 @@ def test_emitir_cheque_incluye_descripcion_y_opcion_de_impresion():
     informar.assert_called_once_with("Cheque emitido", "Cheque registrado")
 
 
+def test_imprimir_conciliacion_pide_destino_y_exporta_resultado():
+    resultado = {"cuenta": {"id": 7}, "fecha_corte": "2026-06-30"}
+    app = SimpleNamespace(resultado_conciliacion=resultado)
+
+    with patch.object(
+        ui_tk.filedialog, "asksaveasfilename", return_value="reporte.pdf"
+    ) as seleccionar, patch.object(
+        ui_tk.service, "exportar_conciliacion"
+    ) as exportar:
+        ui_tk.ConciliadorApp.imprimir_conciliacion(app)
+
+    assert seleccionar.call_args.kwargs["initialfile"] == "conciliacion_7_2026-06-30.pdf"
+    exportar.assert_called_once_with(resultado, "reporte.pdf")
+
+
 def test_fin_de_mes_usa_el_ultimo_dia_del_periodo():
     assert ui_tk.ConciliadorApp._fin_de_mes("2024-02") == "2024-02-29"
     assert ui_tk.ConciliadorApp._fin_de_mes("2026-06") == "2026-06-30"

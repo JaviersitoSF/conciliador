@@ -27,6 +27,7 @@ from .movements import (
 from .printing import (
     FORMATO_IMPRESION_DEFAULT,
     abrir_pdf_silenciosamente,
+    exportar_conciliacion_pdf,
     formatear_fecha_cheque,
     formatear_monto_impresion,
     imprimir_cheque_pdf,

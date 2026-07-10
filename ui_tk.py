@@ -343,6 +343,13 @@ class ConciliadorApp(tk.Tk):
             command=self.conciliar,
         )
         self.boton_conciliar.pack(side="left")
+        self.boton_imprimir_conciliacion = ttk.Button(
+            acciones,
+            text="Exportar PDF para imprimir",
+            command=self.imprimir_conciliacion,
+            state="disabled",
+        )
+        self.boton_imprimir_conciliacion.pack(side="left", padx=(8, 0))
 
         self.resumen_conciliacion = ttk.Label(
             self.tab_conciliacion,
@@ -952,6 +959,8 @@ class ConciliadorApp(tk.Tk):
                 for clave, titulo in etiquetas
             )
         )
+        self.resultado_conciliacion = resultado
+        self.boton_imprimir_conciliacion.configure(state="normal")
         mensajes_vacios = (
             "No hay cheques cobrados",
             "No hay cheques en tránsito",
@@ -960,6 +969,28 @@ class ConciliadorApp(tk.Tk):
         )
         for tabla, mensaje in zip(tablas, mensajes_vacios):
             self._mostrar_estado_vacio(tabla, mensaje)
+
+    def imprimir_conciliacion(self):
+        resultado = getattr(self, "resultado_conciliacion", None)
+        if not resultado:
+            messagebox.showwarning(
+                "Imprimir conciliación", "Primero debe generar una conciliación."
+            )
+            return
+        corte = resultado.get("fecha_corte") or "sin_fecha"
+        cuenta_id = resultado["cuenta"]["id"]
+        archivo = filedialog.asksaveasfilename(
+            title="Exportar conciliación",
+            defaultextension=".pdf",
+            initialfile=f"conciliacion_{cuenta_id}_{corte}.pdf",
+            filetypes=[("Documento PDF", "*.pdf")],
+        )
+        if not archivo:
+            return
+        try:
+            service.exportar_conciliacion(resultado, archivo)
+        except Exception as e:
+            messagebox.showerror("Imprimir conciliación", str(e))
 
     def refrescar_todo(self):
         self._cargar_selector_cuentas()
@@ -1198,6 +1229,8 @@ class ConciliadorApp(tk.Tk):
             tabla.delete(item)
 
     def _limpiar_conciliacion(self):
+        self.resultado_conciliacion = None
+        self.boton_imprimir_conciliacion.configure(state="disabled")
         self.resumen_conciliacion.configure(
             text="Seleccione un estado de cuenta para ver la conciliación."
         )

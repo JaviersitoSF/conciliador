@@ -77,6 +77,9 @@ class ConciliadorService:
             cuenta_id, archivo_banco, fecha_corte
         )
 
+    def exportar_conciliacion(self, resultado, archivo_salida):
+        return self.operations.exportar_conciliacion_pdf(resultado, archivo_salida)
+
     def obtener_formato(self, cuenta_id=None):
         return self.operations.obtener_formato_impresion(cuenta_id)
 

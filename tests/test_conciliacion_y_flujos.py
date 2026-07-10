@@ -1,4 +1,5 @@
 import subprocess
+from decimal import Decimal
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -8,6 +9,30 @@ import pytest
 
 from conciliador import operations as main
 from conciliador import printing
+
+
+def test_exportar_conciliacion_pdf_excluye_cheques_cobrados_y_abre_archivo(tmp_path):
+    resultado = {
+        "cuenta": {"id": 4, "banco": "Banco", "nombre": "Cuenta", "numero": "123"},
+        "fecha_corte": "2026-06-30",
+        "estado_cuenta": {"numero": "123", "fecha_fin": "2026-06-30", "moneda": "GTQ"},
+        "cheques_cobrados": [{"num": "99", "monto_nuestro": Decimal("99.00")}],
+        "cheques_transito": [
+            {"num": "10", "monto_nuestro": Decimal("25.50"), "mensaje": "Pendiente"}
+        ],
+        "diferencias_depositos": [],
+        "diferencias_notas_debito": [],
+    }
+    destino = tmp_path / "conciliacion.pdf"
+
+    with patch("conciliador.printing.abrir_pdf") as abrir:
+        ruta = printing.exportar_conciliacion_pdf(resultado, destino)
+
+    assert ruta == destino
+    assert destino.read_bytes().startswith(b"%PDF")
+    abrir.assert_called_once_with(destino)
+    contenido = destino.read_bytes()
+    assert b"99.00" not in contenido
 
 
 def crear_estado_bi(ruta, cuenta="0480003228", fin="30/06/2026", filas=None):

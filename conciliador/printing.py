@@ -7,9 +7,13 @@ from pathlib import Path
 
 from num2words import num2words
 from reportlab.lib.pagesizes import LETTER
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import landscape
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .domain import convertir_monto
 from .errors import ErrorOperacion
@@ -110,6 +114,114 @@ def abrir_pdf_silenciosamente(comando):
         if detalle:
             raise RuntimeError(detalle) from exc
         raise RuntimeError(f"el comando fallo con codigo {exc.returncode}") from exc
+
+
+def abrir_pdf(ruta):
+    """Abre un PDF en el visor predeterminado, sin enviarlo a impresión."""
+    ruta = str(Path(ruta).resolve())
+    sistema = platform.system()
+    if sistema == "Windows":
+        startfile = getattr(os, "startfile", None)
+        if not callable(startfile):
+            raise RuntimeError("No se encontró una aplicación para abrir el PDF.")
+        startfile(ruta)
+    elif sistema == "Darwin":
+        abrir_pdf_silenciosamente(["open", ruta])
+    else:
+        abrir_pdf_silenciosamente(["xdg-open", ruta])
+
+
+def exportar_conciliacion_pdf(resultado, archivo_salida):
+    """Exporta las tablas visibles de conciliación, excepto cheques cobrados."""
+    nombre_pdf = resolver_archivo_salida(archivo_salida)
+    estilos = getSampleStyleSheet()
+    documento = SimpleDocTemplate(
+        str(nombre_pdf),
+        pagesize=landscape(LETTER),
+        rightMargin=0.45 * cm,
+        leftMargin=0.45 * cm,
+        topMargin=0.6 * cm,
+        bottomMargin=0.6 * cm,
+        title="Conciliación bancaria",
+    )
+    cuenta = resultado["cuenta"]
+    estado = resultado["estado_cuenta"]
+    moneda = estado.get("moneda", "GTQ")
+    simbolo = "$" if moneda == "USD" else "Q"
+    corte = resultado.get("fecha_corte") or estado.get("fecha_fin") or "N/D"
+    elementos = [
+        Paragraph("Conciliación bancaria", estilos["Title"]),
+        Paragraph(
+            f"{cuenta.get('banco', '')} · {cuenta.get('nombre', '')} · "
+            f"Cuenta {cuenta.get('numero') or estado.get('numero') or 'N/D'} · "
+            f"Corte {corte} · Moneda {moneda}",
+            estilos["Normal"],
+        ),
+        Spacer(1, 0.35 * cm),
+    ]
+
+    secciones = (
+        (
+            "Cheques en tránsito",
+            ("Número", "Monto", "Detalle"),
+            resultado["cheques_transito"],
+            lambda fila: (
+                fila["num"],
+                f"{simbolo} {formatear_monto_impresion(fila.get('monto_nuestro') or 0)}",
+                fila["mensaje"],
+            ),
+            (2.5 * cm, 3.2 * cm, 19.5 * cm),
+        ),
+        (
+            "Diferencias de depósitos",
+            ("Número", "Fecha", "Descripción", "Monto", "Diferencia"),
+            resultado["diferencias_depositos"],
+            lambda fila: (
+                fila["num"], fila["fecha"], fila["descripcion"],
+                f"{simbolo} {formatear_monto_impresion(fila.get('monto') or 0)}",
+                fila["diferencia"],
+            ),
+            (2.3 * cm, 2.8 * cm, 9.2 * cm, 3.1 * cm, 7.8 * cm),
+        ),
+        (
+            "Diferencias de notas de débito",
+            ("Número", "Fecha", "Descripción", "Monto", "Diferencia"),
+            resultado["diferencias_notas_debito"],
+            lambda fila: (
+                fila["num"], fila["fecha"], fila["descripcion"],
+                f"{simbolo} {formatear_monto_impresion(fila.get('monto') or 0)}",
+                fila["diferencia"],
+            ),
+            (2.3 * cm, 2.8 * cm, 9.2 * cm, 3.1 * cm, 7.8 * cm),
+        ),
+    )
+    estilo_celda = estilos["BodyText"]
+    estilo_celda.fontSize = 8
+    estilo_celda.leading = 10
+    for titulo, encabezados, filas, convertir, anchos in secciones:
+        elementos.append(Paragraph(titulo, estilos["Heading2"]))
+        datos = [[Paragraph(str(valor), estilo_celda) for valor in encabezados]]
+        datos.extend(
+            [Paragraph(str(valor), estilo_celda) for valor in convertir(fila)]
+            for fila in filas
+        )
+        if not filas:
+            datos.append([Paragraph("Sin registros", estilo_celda)] + [""] * (len(encabezados) - 1))
+        tabla = Table(datos, colWidths=anchos, repeatRows=1)
+        tabla.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DCE6F1")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#808080")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("SPAN", (0, 1), (-1, 1)) if not filas else ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        elementos.extend((tabla, Spacer(1, 0.25 * cm)))
+
+    documento.build(elementos)
+    abrir_pdf(nombre_pdf)
+    return nombre_pdf
 
 
 def imprimir_cheque_pdf(
