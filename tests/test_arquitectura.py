@@ -52,6 +52,29 @@ def test_base_nueva_migra_y_repetir_es_inocuo(tmp_path):
     assert {"cheques", "depositos", "auditoria", "formatos_impresion"} <= tables
 
 
+def test_migracion_agrega_formato_de_conciliacion_a_cuentas_existentes(tmp_path):
+    paths = AppPaths.portable(tmp_path)
+    database = Database(paths)
+    database.initialize()
+    connection = sqlite3.connect(paths.database)
+    try:
+        connection.execute("DELETE FROM schema_migrations WHERE version = 4")
+        connection.execute(
+            "ALTER TABLE cuentas_bancarias DROP COLUMN formato_conciliacion"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    assert database.initialize() == LATEST_VERSION
+    with database.connect() as connection:
+        formato = connection.execute(
+            "SELECT formato_conciliacion FROM cuentas_bancarias WHERE id = 1"
+        ).fetchone()[0]
+
+    assert formato == "Banco Industrial"
+
+
 def test_conexion_aplica_pragmas(tmp_path):
     database = Database(AppPaths.portable(tmp_path))
 

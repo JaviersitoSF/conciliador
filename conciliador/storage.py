@@ -10,6 +10,10 @@ from .printing import FORMATO_IMPRESION_DEFAULT, validar_formato_impresion
 ARCHIVO_DATOS = "conciliador.db"
 DIRECTORIO_RESPALDOS = "respaldos"
 MAX_RESPALDOS = 10
+FORMATOS_CONCILIACION = ("Banco Industrial",)
+FORMATO_CONCILIACION_DEFAULT = FORMATOS_CONCILIACION[0]
+
+
 def configure_paths(paths):
     global ARCHIVO_DATOS, DIRECTORIO_RESPALDOS
     ARCHIVO_DATOS = str(paths.database)
@@ -44,6 +48,8 @@ def inicializar_db():
                 banco TEXT NOT NULL,
                 nombre TEXT NOT NULL,
                 numero TEXT NOT NULL DEFAULT '',
+                formato_conciliacion TEXT NOT NULL DEFAULT 'Banco Industrial'
+                    CHECK (formato_conciliacion IN ('Banco Industrial')),
                 activa INTEGER NOT NULL DEFAULT 1 CHECK (activa IN (0, 1)),
                 creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (banco, nombre, numero)
@@ -122,6 +128,16 @@ def inicializar_db():
             );
             """
         )
+        columnas_cuenta = {
+            fila[1]
+            for fila in conexion.execute("PRAGMA table_info(cuentas_bancarias)")
+        }
+        if "formato_conciliacion" not in columnas_cuenta:
+            conexion.execute(
+                "ALTER TABLE cuentas_bancarias ADD COLUMN formato_conciliacion "
+                "TEXT NOT NULL DEFAULT 'Banco Industrial' "
+                "CHECK (formato_conciliacion IN ('Banco Industrial'))"
+            )
         conexion.execute(
             """
             INSERT OR IGNORE INTO cuentas_bancarias (id, banco, nombre, numero)
@@ -144,7 +160,7 @@ def _insertar_formato_default(conexion, cuenta_id):
 def listar_cuentas_bancarias(solo_activas=True):
     inicializar_db()
     consulta = """
-        SELECT id, banco, nombre, numero, activa
+        SELECT id, banco, nombre, numero, formato_conciliacion, activa
         FROM cuentas_bancarias
     """
     if solo_activas:
@@ -153,8 +169,11 @@ def listar_cuentas_bancarias(solo_activas=True):
     with conectar_db() as conexion:
         return [dict(fila) for fila in conexion.execute(consulta).fetchall()]
 
-def crear_cuenta_bancaria(banco, nombre, numero=""):
+def crear_cuenta_bancaria(
+    banco, nombre, numero="", formato_conciliacion=FORMATO_CONCILIACION_DEFAULT
+):
     banco, nombre, numero = _normalizar_datos_cuenta(banco, nombre, numero)
+    formato_conciliacion = _validar_formato_conciliacion(formato_conciliacion)
     if not banco or not nombre:
         raise ErrorOperacion("⚠️ Banco y nombre de cuenta son obligatorios.")
 
@@ -162,10 +181,11 @@ def crear_cuenta_bancaria(banco, nombre, numero=""):
         with transaccion() as conexion:
             cursor = conexion.execute(
                 """
-                INSERT INTO cuentas_bancarias (banco, nombre, numero)
-                VALUES (?, ?, ?)
+                INSERT INTO cuentas_bancarias (
+                    banco, nombre, numero, formato_conciliacion
+                ) VALUES (?, ?, ?, ?)
                 """,
-                (banco, nombre, numero),
+                (banco, nombre, numero, formato_conciliacion),
             )
             cuenta_id = cursor.lastrowid
             _insertar_formato_default(conexion, cuenta_id)
@@ -187,9 +207,23 @@ def _normalizar_datos_cuenta(banco, nombre, numero):
     numero = str(numero or "").strip()
     return banco, nombre, numero
 
-def actualizar_cuenta_bancaria(cuenta_id, banco, nombre, numero=""):
+def _validar_formato_conciliacion(formato):
+    formato = str(formato or "").strip()
+    if formato not in FORMATOS_CONCILIACION:
+        raise ErrorOperacion("⚠️ Formato de conciliación inválido.")
+    return formato
+
+
+def actualizar_cuenta_bancaria(
+    cuenta_id, banco, nombre, numero="", formato_conciliacion=None
+):
     cuenta = obtener_cuenta(cuenta_id)
     banco, nombre, numero = _normalizar_datos_cuenta(banco, nombre, numero)
+    formato_conciliacion = _validar_formato_conciliacion(
+        cuenta["formato_conciliacion"]
+        if formato_conciliacion is None
+        else formato_conciliacion
+    )
     if not banco or not nombre:
         raise ErrorOperacion("⚠️ Banco y nombre de cuenta son obligatorios.")
 
@@ -198,10 +232,10 @@ def actualizar_cuenta_bancaria(cuenta_id, banco, nombre, numero=""):
             conexion.execute(
                 """
                 UPDATE cuentas_bancarias
-                SET banco = ?, nombre = ?, numero = ?
+                SET banco = ?, nombre = ?, numero = ?, formato_conciliacion = ?
                 WHERE id = ?
                 """,
-                (banco, nombre, numero, cuenta["id"]),
+                (banco, nombre, numero, formato_conciliacion, cuenta["id"]),
             )
             registrar_auditoria(
                 conexion,
@@ -226,7 +260,7 @@ def obtener_cuenta(cuenta_id=None):
     with conectar_db() as conexion:
         cuenta = conexion.execute(
             """
-            SELECT id, banco, nombre, numero, activa
+            SELECT id, banco, nombre, numero, formato_conciliacion, activa
             FROM cuentas_bancarias
             WHERE id = ? AND activa = 1
             """,

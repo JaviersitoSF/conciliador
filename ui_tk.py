@@ -344,22 +344,49 @@ class ConciliadorApp(tk.Tk):
         )
         self.boton_conciliar.pack(side="left")
 
+        self.resumen_conciliacion = ttk.Label(
+            self.tab_conciliacion,
+            text="Seleccione un estado de cuenta para ver la conciliación.",
+            anchor="w",
+        )
+        self.resumen_conciliacion.pack(fill="x", pady=(0, 12))
+
         panel = ttk.Frame(self.tab_conciliacion)
         panel.pack(fill="both", expand=True)
         panel.columnconfigure((0, 1), weight=1, uniform="conc")
-        panel.rowconfigure(0, weight=1)
+        panel.rowconfigure((0, 1), weight=1, uniform="conc")
 
-        cheques = ttk.LabelFrame(panel, text="Resultados de cheques emitidos", padding=10)
-        cheques.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        cheques.rowconfigure(0, weight=1)
-        cheques.columnconfigure(0, weight=1)
-        self.tabla_conciliacion = self._tabla(cheques, ("Num", "Resultado", "Mensaje"))
+        cobrados = ttk.LabelFrame(panel, text="Cheques cobrados", padding=10)
+        cobrados.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
+        cobrados.rowconfigure(0, weight=1)
+        cobrados.columnconfigure(0, weight=1)
+        self.tabla_cheques_cobrados = self._tabla(
+            cobrados, ("Numero", "Monto", "Resultado")
+        )
 
-        banco = ttk.LabelFrame(panel, text="Cargos no registrados", padding=10)
-        banco.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-        banco.rowconfigure(0, weight=1)
-        banco.columnconfigure(0, weight=1)
-        self.tabla_no_registrados = self._tabla(banco, ("Num", "Monto", "Mensaje"))
+        transito = ttk.LabelFrame(panel, text="Cheques en tránsito", padding=10)
+        transito.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=(0, 6))
+        transito.rowconfigure(0, weight=1)
+        transito.columnconfigure(0, weight=1)
+        self.tabla_cheques_transito = self._tabla(
+            transito, ("Numero", "Monto", "Detalle")
+        )
+
+        depositos = ttk.LabelFrame(panel, text="Diferencias de depósitos", padding=10)
+        depositos.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(6, 0))
+        depositos.rowconfigure(0, weight=1)
+        depositos.columnconfigure(0, weight=1)
+        self.tabla_depositos_no_ingresados = self._tabla(
+            depositos, ("Numero", "Fecha", "Descripcion", "Monto", "Diferencia")
+        )
+
+        notas = ttk.LabelFrame(panel, text="Diferencias de notas de débito", padding=10)
+        notas.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(6, 0))
+        notas.rowconfigure(0, weight=1)
+        notas.columnconfigure(0, weight=1)
+        self.tabla_notas_debito_no_ingresadas = self._tabla(
+            notas, ("Numero", "Fecha", "Descripcion", "Monto", "Diferencia")
+        )
 
     def _campo(self, padre, etiqueta, fila):
         ttk.Label(padre, text=etiqueta).grid(row=fila, column=0, sticky="w", pady=5)
@@ -863,7 +890,9 @@ class ConciliadorApp(tk.Tk):
     def conciliar(self):
         archivo = filedialog.askopenfilename(
             title="Seleccionar estado de cuenta",
-            filetypes=[("Archivos Excel", "*.xlsx *.xls")],
+            filetypes=[
+                ("Banco Industrial CSV", "*.csv"),
+            ],
         )
         if not archivo:
             return
@@ -872,8 +901,14 @@ class ConciliadorApp(tk.Tk):
         )
 
     def _conciliar_archivo(self, archivo):
-        self._limpiar_tabla(self.tabla_conciliacion)
-        self._limpiar_tabla(self.tabla_no_registrados)
+        tablas = (
+            self.tabla_cheques_cobrados,
+            self.tabla_cheques_transito,
+            self.tabla_depositos_no_ingresados,
+            self.tabla_notas_debito_no_ingresadas,
+        )
+        for tabla in tablas:
+            self._limpiar_tabla(tabla)
         try:
             resultado = service.conciliar(
                 self.cuenta_id_actual(),
@@ -883,17 +918,48 @@ class ConciliadorApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Conciliación", str(e))
             return
-        for fila in resultado["cheques"]:
-            self.tabla_conciliacion.insert("", tk.END, values=(fila["num"], fila["resultado"], fila["mensaje"]))
-        for fila in resultado["no_registrados"]:
-            monto = core.formatear_monto(fila["monto"]) if fila["monto"] is not None else "N/D"
-            self.tabla_no_registrados.insert("", tk.END, values=(fila["num"], monto, fila["mensaje"]))
-        self._mostrar_estado_vacio(
-            self.tabla_conciliacion, "No se encontraron cheques"
+        for fila in resultado["cheques_cobrados"]:
+            monto = fila.get("monto_nuestro")
+            self.tabla_cheques_cobrados.insert(
+                "", tk.END, values=(fila["num"], core.formatear_monto(monto), fila["resultado"])
+            )
+        for fila in resultado["cheques_transito"]:
+            monto = fila.get("monto_nuestro")
+            self.tabla_cheques_transito.insert(
+                "", tk.END, values=(fila["num"], core.formatear_monto(monto), fila["mensaje"])
+            )
+        for clave, tabla in (
+            ("diferencias_depositos", self.tabla_depositos_no_ingresados),
+            ("diferencias_notas_debito", self.tabla_notas_debito_no_ingresadas),
+        ):
+            for fila in resultado[clave]:
+                tabla.insert(
+                    "", tk.END,
+                    values=(fila["num"], fila["fecha"], fila["descripcion"], core.formatear_monto(fila["monto"]), fila["diferencia"]),
+                )
+
+        resumen = resultado["resumen"]
+        simbolo = "$" if resultado["estado_cuenta"]["moneda"] == "USD" else "Q"
+        etiquetas = (
+            ("cheques_cobrados", "Cobrados"),
+            ("cheques_transito", "En tránsito"),
+            ("diferencias_depositos", "Diferencias de depósitos"),
+            ("diferencias_notas_debito", "Diferencias de notas de débito"),
         )
-        self._mostrar_estado_vacio(
-            self.tabla_no_registrados, "No se encontraron cargos"
+        self.resumen_conciliacion.configure(
+            text="   |   ".join(
+                f"{titulo}: {resumen[clave]['cantidad']} · {simbolo} {core.formatear_monto(resumen[clave]['total'])}"
+                for clave, titulo in etiquetas
+            )
         )
+        mensajes_vacios = (
+            "No hay cheques cobrados",
+            "No hay cheques en tránsito",
+            "No hay diferencias de depósitos",
+            "No hay diferencias de notas de débito",
+        )
+        for tabla, mensaje in zip(tablas, mensajes_vacios):
+            self._mostrar_estado_vacio(tabla, mensaje)
 
     def refrescar_todo(self):
         self._cargar_selector_cuentas()
@@ -947,15 +1013,17 @@ class ConciliadorApp(tk.Tk):
             return
         DialogoNuevaCuenta(
             self,
-            lambda banco, nombre, numero: self._actualizar_cuenta(
-                cuenta_id, banco, nombre, numero
+            lambda banco, nombre, numero, formato: self._actualizar_cuenta(
+                cuenta_id, banco, nombre, numero, formato
             ),
             cuenta=cuenta,
         )
 
-    def _registrar_cuenta(self, banco, nombre, numero):
+    def _registrar_cuenta(self, banco, nombre, numero, formato_conciliacion):
         try:
-            cuenta_id = service.crear_cuenta(banco, nombre, numero)
+            cuenta_id = service.crear_cuenta(
+                banco, nombre, numero, formato_conciliacion
+            )
         except Exception as e:
             messagebox.showerror("No se pudo crear", str(e))
             return False
@@ -971,9 +1039,13 @@ class ConciliadorApp(tk.Tk):
         )
         return True
 
-    def _actualizar_cuenta(self, cuenta_id, banco, nombre, numero):
+    def _actualizar_cuenta(
+        self, cuenta_id, banco, nombre, numero, formato_conciliacion
+    ):
         try:
-            service.actualizar_cuenta(cuenta_id, banco, nombre, numero)
+            service.actualizar_cuenta(
+                cuenta_id, banco, nombre, numero, formato_conciliacion
+            )
         except Exception as e:
             messagebox.showerror("No se pudo actualizar", str(e))
             return False
@@ -1126,14 +1198,17 @@ class ConciliadorApp(tk.Tk):
             tabla.delete(item)
 
     def _limpiar_conciliacion(self):
-        self._limpiar_tabla(self.tabla_conciliacion)
-        self._limpiar_tabla(self.tabla_no_registrados)
-        self._mostrar_estado_vacio(
-            self.tabla_conciliacion, "Seleccione un estado de cuenta"
+        self.resumen_conciliacion.configure(
+            text="Seleccione un estado de cuenta para ver la conciliación."
         )
-        self._mostrar_estado_vacio(
-            self.tabla_no_registrados, "Seleccione un estado de cuenta"
-        )
+        for tabla in (
+            self.tabla_cheques_cobrados,
+            self.tabla_cheques_transito,
+            self.tabla_depositos_no_ingresados,
+            self.tabla_notas_debito_no_ingresadas,
+        ):
+            self._limpiar_tabla(tabla)
+            self._mostrar_estado_vacio(tabla, "Seleccione un estado de cuenta")
 
 
 class DialogoMovimiento(tk.Toplevel):
@@ -1208,13 +1283,25 @@ class DialogoNuevaCuenta(tk.Toplevel):
         self.banco = self._campo(contenido, "Nombre del banco", 0)
         self.nombre = self._campo(contenido, "Nombre interno", 1)
         self.numero = self._campo(contenido, "Número de cuenta (opcional)", 2)
+        ttk.Label(contenido, text="Formato de conciliación").grid(
+            row=3, column=0, sticky="w", padx=(0, 12), pady=6
+        )
+        self.formato_conciliacion = ttk.Combobox(
+            contenido,
+            state="readonly",
+            width=34,
+            values=core.FORMATOS_CONCILIACION,
+        )
+        self.formato_conciliacion.grid(row=3, column=1, sticky="ew", pady=6)
+        self.formato_conciliacion.current(0)
         if cuenta:
             self.banco.insert(0, cuenta["banco"])
             self.nombre.insert(0, cuenta["nombre"])
             self.numero.insert(0, cuenta["numero"])
+            self.formato_conciliacion.set(cuenta["formato_conciliacion"])
 
         acciones = ttk.Frame(contenido)
-        acciones.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(16, 0))
+        acciones.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(16, 0))
         ttk.Button(acciones, text="Cancelar", command=self.destroy).pack(
             side="right"
         )
@@ -1263,7 +1350,12 @@ class DialogoNuevaCuenta(tk.Toplevel):
         self.boton_guardar.configure(state="disabled")
         self.update_idletasks()
         try:
-            guardada = self.al_guardar(banco, nombre, self.numero.get().strip())
+            guardada = self.al_guardar(
+                banco,
+                nombre,
+                self.numero.get().strip(),
+                self.formato_conciliacion.get(),
+            )
         finally:
             if self.winfo_exists():
                 self.boton_guardar.configure(state="normal")

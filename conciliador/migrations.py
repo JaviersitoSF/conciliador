@@ -44,6 +44,8 @@ CREATE TABLE cuentas_bancarias (
     banco TEXT NOT NULL,
     nombre TEXT NOT NULL,
     numero TEXT NOT NULL DEFAULT '',
+    formato_conciliacion TEXT NOT NULL DEFAULT 'Banco Industrial'
+        CHECK (formato_conciliacion IN ('Banco Industrial')),
     activa INTEGER NOT NULL DEFAULT 1 CHECK (activa IN (0, 1)),
     creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (banco, nombre, numero)
@@ -148,10 +150,24 @@ def _upgrade_3(connection):
         )
 
 
+def _upgrade_4(connection):
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(cuentas_bancarias)")
+    }
+    if "formato_conciliacion" not in columns:
+        connection.execute(
+            "ALTER TABLE cuentas_bancarias ADD COLUMN formato_conciliacion "
+            "TEXT NOT NULL DEFAULT 'Banco Industrial' "
+            "CHECK (formato_conciliacion IN ('Banco Industrial'))"
+        )
+
+
 MIGRATIONS = (
     Migration(1, "esquema_inicial", _upgrade_1),
     Migration(2, "numero_deposito", _upgrade_2),
     Migration(3, "estado_deposito", _upgrade_3),
+    Migration(4, "formato_conciliacion_cuenta", _upgrade_4),
 )
 LATEST_VERSION = MIGRATIONS[-1].version
 

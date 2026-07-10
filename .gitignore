@@ -35,3 +35,5 @@ cheque_*.pdf
 cheque_media_carta.pdf
 /data
 /logs
+/estados-de-cuenta
+/exports

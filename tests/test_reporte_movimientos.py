@@ -5,11 +5,26 @@ import unittest
 from contextlib import redirect_stdout
 from decimal import Decimal
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
-import pandas as pd
-
 from conciliador import operations as main
+
+
+def crear_estado_bi(ruta, filas):
+    contenido = "\r\n".join(
+        [
+            "Tipo de Transacciones,",
+            "Cuenta: 0480003228 - BENISA S A",
+            "Saldo inicial (GTQ): 1000.00",
+            "Del 01/06/2026 al 30/06/2026",
+            "",
+            "Fecha,TT,Descripción,No. Doc,Debe (GTQ),Haber (GTQ),Saldo (GTQ)",
+            *filas,
+            "",
+        ]
+    )
+    Path(ruta).write_bytes(contenido.encode("latin-1"))
 
 
 class SistemaBancarioTests(unittest.TestCase):
@@ -156,11 +171,17 @@ class SistemaBancarioTests(unittest.TestCase):
 
     def test_conciliacion_detecta_duplicados(self):
         main.guardar_cheque_en_archivo("35", "2026-06-03", "A", "100.00")
-        pd.DataFrame(
-            {"Num_cheque": [35, 35], "Monto": ["100.00", "100.00"]}
-        ).to_excel(main.ARCHIVO_BANCO, index=False)
+        crear_estado_bi(
+            "estado.csv",
+            [
+                "03-06-2026,CQ,COMPENSACIÓN,35,100.00,,900.00",
+                "03-06-2026,CQ,COMPENSACIÓN,35,100.00,,800.00",
+            ],
+        )
 
-        resultado = main.obtener_conciliacion()["cheques"][0]
+        resultado = main.obtener_conciliacion(
+            archivo_banco="estado.csv"
+        )["cheques"][0]
 
         self.assertEqual(resultado["resultado"], "DUPLICADO")
         self.assertEqual(resultado["monto_banco"], Decimal("200.00"))
@@ -171,14 +192,17 @@ class SistemaBancarioTests(unittest.TestCase):
         main.guardar_cheque_en_archivo("3", "2026-06-03", "TRANSITO", "100.00")
         main.guardar_cheque_en_archivo("4", "2026-06-03", "ANULADO", "100.00")
         main.anular_cheque_numero("4")
-        pd.DataFrame(
-            {
-                "Num_cheque": [1, 2, 4, 99],
-                "Monto": ["100.00", "90.00", "100.00", "12.00"],
-            }
-        ).to_excel(main.ARCHIVO_BANCO, index=False)
+        crear_estado_bi(
+            "estado.csv",
+            [
+                "03-06-2026,CQ,COMPENSACIÓN,1,100.00,,900.00",
+                "03-06-2026,CQ,COMPENSACIÓN,2,90.00,,810.00",
+                "03-06-2026,CQ,COMPENSACIÓN,4,100.00,,710.00",
+                "03-06-2026,CQ,COMPENSACIÓN,99,12.00,,698.00",
+            ],
+        )
 
-        resultado = main.obtener_conciliacion()
+        resultado = main.obtener_conciliacion(archivo_banco="estado.csv")
         estados = {fila["num"]: fila["resultado"] for fila in resultado["cheques"]}
 
         self.assertEqual(estados["1"], "COBRADO")

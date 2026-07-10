@@ -7,12 +7,18 @@ class ConciliadorService:
     def listar_cuentas(self):
         return self.operations.listar_cuentas_bancarias()
 
-    def crear_cuenta(self, banco, nombre, numero=""):
-        return self.operations.crear_cuenta_bancaria(banco, nombre, numero)
+    def crear_cuenta(self, banco, nombre, numero="", formato_conciliacion=None):
+        if formato_conciliacion is None:
+            return self.operations.crear_cuenta_bancaria(banco, nombre, numero)
+        return self.operations.crear_cuenta_bancaria(
+            banco, nombre, numero, formato_conciliacion
+        )
 
-    def actualizar_cuenta(self, cuenta_id, banco, nombre, numero=""):
+    def actualizar_cuenta(
+        self, cuenta_id, banco, nombre, numero="", formato_conciliacion=None
+    ):
         return self.operations.actualizar_cuenta_bancaria(
-            cuenta_id, banco, nombre, numero
+            cuenta_id, banco, nombre, numero, formato_conciliacion
         )
 
     def emitir_cheque(self, *args, **kwargs):

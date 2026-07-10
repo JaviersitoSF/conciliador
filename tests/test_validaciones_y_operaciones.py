@@ -68,6 +68,7 @@ def test_cuentas_validan_obligatorios_duplicados_e_inactivas():
     assert cuenta["banco"] == "BANCO"
     assert cuenta["nombre"] == "Operativa"
     assert cuenta["numero"] == "001"
+    assert cuenta["formato_conciliacion"] == "Banco Industrial"
 
     with pytest.raises(main.ErrorOperacion, match="ya está registrada"):
         main.crear_cuenta_bancaria("BANCO", "Operativa", "001")
@@ -83,6 +84,15 @@ def test_cuentas_validan_obligatorios_duplicados_e_inactivas():
     }
     with pytest.raises(main.ErrorOperacion, match="inactiva"):
         main.obtener_cuenta(cuenta_id)
+
+
+def test_cuentas_rechazan_formatos_de_conciliacion_no_soportados():
+    with pytest.raises(
+        main.ErrorOperacion, match="Formato de conciliación inválido"
+    ):
+        main.crear_cuenta_bancaria(
+            "BANCO", "Operativa", "001", "Otro banco"
+        )
 
 
 def test_cuentas_tienen_formatos_de_impresion_independientes():
@@ -110,6 +120,7 @@ def test_actualizar_cuenta_normaliza_datos_y_rechaza_duplicados():
         "banco": "BANCO NUEVO",
         "nombre": "Cuenta editada",
         "numero": "009",
+        "formato_conciliacion": "Banco Industrial",
         "activa": 1,
     }
 

@@ -1,6 +1,8 @@
-import os
+import csv
+import re
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pandas as pd
 
@@ -9,14 +11,229 @@ from .errors import ErrorOperacion
 from .movements import cargar_cheques_registrados, cargar_depositos_registrados, cargar_notas_debito_registradas, formatear_monto
 from .storage import obtener_cuenta
 
-ARCHIVO_BANCO = "estado_cuenta.xlsx"
+PATRON_CUENTA_BI = re.compile(r"^Cuenta:\s*([0-9]+)\s*-\s*(.+)$", re.IGNORECASE)
+PATRON_PERIODO_BI = re.compile(
+    r"^Del\s+(\d{2}/\d{2}/\d{4})\s+al\s+(\d{2}/\d{2}/\d{4})$",
+    re.IGNORECASE,
+)
+PATRON_MONEDA_BI = re.compile(r"\((GTQ|USD)\)", re.IGNORECASE)
+
+
+def _normalizar_numero_cuenta(valor):
+    """Normaliza la presentación del número sin alterar su valor bancario."""
+    digitos = re.sub(r"\D", "", str(valor or ""))
+    if not digitos:
+        return ""
+    return digitos.lstrip("0") or "0"
+
+
+def _leer_csv_banco_industrial(archivo):
+    """Convierte el CSV exportado por BI a cheques y otros cargos bancarios."""
+    contenido = None
+    for codificacion in ("utf-8-sig", "latin-1"):
+        try:
+            contenido = Path(archivo).read_text(encoding=codificacion)
+            break
+        except UnicodeDecodeError:
+            continue
+    if contenido is None:
+        raise ErrorOperacion(
+            "⚠️ No se pudo reconocer la codificación del archivo de Banco Industrial."
+        )
+
+    filas = list(csv.reader(contenido.splitlines()))
+    cuenta_numero = None
+    cuenta_nombre = None
+    fecha_inicio = None
+    fecha_fin = None
+    moneda = None
+    indice_cabecera = None
+
+    for indice, fila in enumerate(filas):
+        primera = str(fila[0] if fila else "").strip()
+        cuenta = PATRON_CUENTA_BI.match(primera)
+        if cuenta:
+            cuenta_numero, cuenta_nombre = cuenta.groups()
+        periodo = PATRON_PERIODO_BI.match(primera)
+        if periodo:
+            fecha_inicio = (
+                datetime.strptime(periodo.group(1), "%d/%m/%Y")
+                .date()
+                .isoformat()
+            )
+            fecha_fin = (
+                datetime.strptime(periodo.group(2), "%d/%m/%Y")
+                .date()
+                .isoformat()
+            )
+        if primera.lower() == "fecha":
+            indice_cabecera = indice
+            moneda_en_cabecera = PATRON_MONEDA_BI.search(",".join(fila))
+            moneda = moneda_en_cabecera.group(1).upper() if moneda_en_cabecera else None
+            break
+
+    if indice_cabecera is None:
+        raise ErrorOperacion(
+            "⚠️ El archivo no contiene la cabecera de movimientos de Banco Industrial."
+        )
+
+    cabecera = [str(valor).strip() for valor in filas[indice_cabecera]]
+    columnas = {
+        nombre.split(" (", 1)[0].lower(): indice
+        for indice, nombre in enumerate(cabecera)
+    }
+    requeridas = ("fecha", "tt", "descripción", "no. doc", "debe", "haber", "saldo")
+    if any(nombre not in columnas for nombre in requeridas):
+        raise ErrorOperacion(
+            "⚠️ El estado de Banco Industrial no contiene todas las columnas esperadas."
+        )
+
+    cheques = []
+    depositos = []
+    notas_debito = []
+    otros_cargos = []
+    for fila in filas[indice_cabecera + 1:]:
+        if not fila or not any(str(valor).strip() for valor in fila):
+            continue
+        if len(fila) > len(cabecera):
+            # BI no siempre encierra entre comillas las comas de la descripción.
+            fila = fila[:2] + [", ".join(fila[2:-4])] + fila[-4:]
+        fila += [""] * (len(cabecera) - len(fila))
+        tipo = fila[columnas["tt"]].strip().upper()
+        debe_original = fila[columnas["debe"]].strip()
+        haber_original = fila[columnas["haber"]].strip()
+        if not debe_original and not haber_original:
+            continue
+        monto_original = debe_original or haber_original
+        monto = convertir_monto(monto_original)
+        if monto is None and tipo != "CQ":
+            continue
+        movimiento = {
+            "Num_cheque": fila[columnas["no. doc"]].strip(),
+            "Monto": monto,
+            "fecha": fila[columnas["fecha"]].strip(),
+            "tipo": tipo,
+            "descripcion": fila[columnas["descripción"]].strip(),
+        }
+        if tipo == "CQ":
+            cheques.append(movimiento)
+        elif tipo in {"DE", "DP"}:
+            depositos.append(movimiento)
+        elif tipo == "ND":
+            notas_debito.append(movimiento)
+        elif debe_original:
+            otros_cargos.append(movimiento)
+
+    return {
+        "cheques": pd.DataFrame(
+            cheques,
+            columns=["Num_cheque", "Monto", "fecha", "tipo", "descripcion"],
+        ),
+        "otros_cargos": otros_cargos,
+        "depositos": depositos,
+        "notas_debito": notas_debito,
+        "cuenta_numero": cuenta_numero,
+        "cuenta_nombre": cuenta_nombre,
+        "fecha_inicio": fecha_inicio,
+        "fecha_fin": fecha_fin,
+        "moneda": moneda or "GTQ",
+    }
+
+
+LECTORES_ESTADO_CUENTA = {
+    "Banco Industrial": {
+        ".csv": _leer_csv_banco_industrial,
+    },
+}
+
+
+def _fecha_bancaria(valor):
+    """Devuelve una fecha comparable para las fechas dd-mm-AAAA de BI."""
+    fecha = pd.to_datetime(valor, dayfirst=True, errors="coerce")
+    return None if pd.isna(fecha) else fecha.date().isoformat()
+
+
+def _separar_movimientos_no_ingresados(locales, bancarios, fecha_inicio, fecha_corte):
+    """Hace un cotejo uno-a-uno y devuelve movimientos sin contraparte.
+
+    Se prefiere documento+monto. Los registros históricos que no tienen número
+    todavía pueden conciliar por fecha+monto, sin reutilizar una fila bancaria.
+    """
+    disponibles = []
+    for movimiento in bancarios:
+        disponibles.append(
+            {
+                **movimiento,
+                "numero_norm": normalizar_numero_cheque(movimiento["Num_cheque"]),
+                "fecha_norm": _fecha_bancaria(movimiento["fecha"]),
+            }
+        )
+
+    locales_vigentes = locales.copy()
+    if fecha_inicio is not None:
+        locales_vigentes = locales_vigentes[
+            locales_vigentes["Fecha_dt"].notna()
+            & (locales_vigentes["Fecha_dt"] >= pd.Timestamp(fecha_inicio))
+        ]
+    if fecha_corte is not None:
+        locales_vigentes = locales_vigentes[
+            locales_vigentes["Fecha_dt"].notna()
+            & (locales_vigentes["Fecha_dt"] <= pd.Timestamp(fecha_corte))
+        ]
+    locales_vigentes = locales_vigentes[
+        locales_vigentes["Estado"].astype(str).str.upper() != "ANULADO"
+    ]
+
+    sin_ingresar = []
+    for _, local in locales_vigentes.iterrows():
+        monto = local["Monto_valor"]
+        numero = normalizar_numero_cheque(local["Num"])
+        fecha = None if pd.isna(local["Fecha_dt"]) else local["Fecha_dt"].date().isoformat()
+        indice = next(
+            (
+                i for i, banco in enumerate(disponibles)
+                if numero and banco["numero_norm"] == numero and banco["Monto"] == monto
+            ),
+            None,
+        )
+        if indice is None and not numero:
+            indice = next(
+                (
+                    i for i, banco in enumerate(disponibles)
+                    if banco["Monto"] == monto and banco["fecha_norm"] == fecha
+                ),
+                None,
+            )
+        if indice is None:
+            sin_ingresar.append(
+                {
+                    "num": str(local["Num"] or "S/N"),
+                    "fecha": fecha or "N/D",
+                    "descripcion": str(local.get("Descripcion", "") or ""),
+                    "monto": monto,
+                }
+            )
+        else:
+            disponibles.pop(indice)
+    return sin_ingresar, disponibles
+
+
+def _leer_estado_cuenta(archivo, formato):
+    extension = Path(archivo).suffix.lower()
+    lector = LECTORES_ESTADO_CUENTA.get(formato, {}).get(extension)
+    if lector is not None:
+        return lector(archivo)
+    raise ErrorOperacion(
+        f"⚠️ El archivo {extension or 'sin extensión'} no es compatible con el formato de conciliación '{formato}'."
+    )
 
 
 def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
     cuenta = obtener_cuenta(cuenta_id)
-    archivo_banco = archivo_banco or ARCHIVO_BANCO
-    if not os.path.exists(archivo_banco):
-        raise ErrorOperacion("⚠️ Faltan archivos. Asegúrate de tener registros y estado de cuenta.")
+    if not archivo_banco:
+        raise ErrorOperacion("⚠️ Selecciona el estado de cuenta que deseas conciliar.")
+    if not Path(archivo_banco).exists():
+        raise ErrorOperacion("⚠️ No se encontró el estado de cuenta seleccionado.")
 
     try:
         df_nuestro = cargar_cheques_registrados(cuenta["id"])
@@ -27,9 +244,26 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 df_nuestro["Fecha_dt"].notna()
                 & (df_nuestro["Fecha_dt"] <= corte)
             ].copy()
-        if df_nuestro.empty:
-            raise ErrorOperacion("⚠️ No hay cheques registrados hasta la fecha de corte.")
-        df_banco = pd.read_excel(archivo_banco)
+        estado_banco = _leer_estado_cuenta(
+            archivo_banco, cuenta["formato_conciliacion"]
+        )
+        numero_archivo = estado_banco["cuenta_numero"]
+        numero_configurado = str(cuenta.get("numero") or "").strip()
+        if numero_archivo and numero_configurado:
+            if _normalizar_numero_cuenta(
+                numero_archivo
+            ) != _normalizar_numero_cuenta(numero_configurado):
+                raise ErrorOperacion(
+                    f"⚠️ El estado pertenece a la cuenta {numero_archivo}, no a la cuenta seleccionada {numero_configurado}."
+                )
+        if fecha_corte is not None and estado_banco["fecha_fin"]:
+            if estado_banco["fecha_fin"] != fecha_corte:
+                raise ErrorOperacion(
+                    f"⚠️ El estado termina el {estado_banco['fecha_fin']}, pero seleccionaste un corte al {fecha_corte}."
+                )
+        df_banco = estado_banco["cheques"]
+        moneda = estado_banco["moneda"]
+        simbolo = "$" if moneda == "USD" else "Q"
 
         columnas_banco = {str(col).strip().lower(): col for col in df_banco.columns}
         col_num = columnas_banco.get("num_cheque")
@@ -61,12 +295,12 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 else:
                     mensaje = f"🚨 Cheque {num} está ANULADO pero el banco sí lo cobró."
                     resultado = "ALERTA"
-                cheques.append({"num": num, "estado": estado, "resultado": resultado, "mensaje": mensaje})
+                cheques.append({"num": num, "estado": estado, "resultado": resultado, "monto_nuestro": fila["Monto_valor"], "mensaje": mensaje})
                 continue
 
             if cobrado.empty:
                 mensaje = f"⏳ Cheque {num} en TRÁNSITO."
-                cheques.append({"num": num, "estado": estado, "resultado": "TRANSITO", "mensaje": mensaje})
+                cheques.append({"num": num, "estado": estado, "resultado": "TRANSITO", "monto_nuestro": fila["Monto_valor"], "mensaje": mensaje})
                 continue
 
             monto_nuestro = fila["Monto_valor"]
@@ -93,7 +327,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 total_banco = sum(montos_validos, Decimal("0.00"))
                 mensaje = (
                     f"🚨 Cheque {num} aparece {len(cobrado)} veces en el banco "
-                    f"por un total de Q {formatear_monto(total_banco)}."
+                    f"por un total de {simbolo} {formatear_monto(total_banco)}."
                 )
                 cheques.append(
                     {
@@ -117,8 +351,8 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 resultado = "COBRADO"
             else:
                 mensaje = (
-                    f"⚠️ ¡Ojo! Cheque {num} diferencia: Nuestro Q {formatear_monto(monto_nuestro)} | "
-                    f"Banco Q {formatear_monto(monto_banco)}"
+                    f"⚠️ ¡Ojo! Cheque {num} diferencia: Nuestro {simbolo} {formatear_monto(monto_nuestro)} | "
+                    f"Banco {simbolo} {formatear_monto(monto_banco)}"
                 )
                 resultado = "DIFERENCIA"
             cheques.append(
@@ -140,7 +374,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 monto_banco = fila_banco["Monto_valor"]
                 monto_texto = formatear_monto(monto_banco) if monto_banco is not None else "N/D"
                 mensaje = (
-                    f"❓ Cheque {num_bco} por Q {monto_texto} cobrado por el banco, "
+                    f"❓ Cheque {num_bco} por {simbolo} {monto_texto} cobrado por el banco, "
                     "pero NO está en nuestro sistema."
                 )
                 no_registrados.append({"num": num_bco, "monto": monto_banco, "mensaje": mensaje})
@@ -164,7 +398,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             )
             mensaje = (
                 f"⚠️ Fila del banco con número de cheque inválido "
-                f"({num_texto}) y monto Q {monto_texto}."
+                f"({num_texto}) y monto {simbolo} {monto_texto}."
             )
             no_registrados.append(
                 {
@@ -175,11 +409,131 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 }
             )
 
+        # Se conserva esta salida histórica para consumidores de la fachada;
+        # la interfaz nueva usa la lista específica de notas no ingresadas.
+        for cargo in estado_banco["notas_debito"] + estado_banco["otros_cargos"]:
+            numero = cargo["Num_cheque"] or "N/D"
+            monto = cargo["Monto"]
+            descripcion = cargo["descripcion"] or "Sin descripción"
+            no_registrados.append(
+                {
+                    "num": numero,
+                    "monto": monto,
+                    "resultado": "CARGO_BANCO",
+                    "mensaje": (
+                        f"❓ {cargo['tipo']} {numero} por {simbolo} {formatear_monto(monto)}: "
+                        f"{descripcion}."
+                    ),
+                }
+            )
+
+        depositos_no_ingresados, depositos_banco_sin_registro = (
+            _separar_movimientos_no_ingresados(
+                cargar_depositos_registrados(cuenta["id"]),
+                estado_banco["depositos"],
+                estado_banco["fecha_inicio"],
+                fecha_corte,
+            )
+        )
+        notas_locales_sin_banco, notas_debito_no_ingresadas = (
+            _separar_movimientos_no_ingresados(
+                cargar_notas_debito_registradas(cuenta["id"]),
+                estado_banco["notas_debito"],
+                estado_banco["fecha_inicio"],
+                fecha_corte,
+            )
+        )
+        notas_debito_no_ingresadas = [
+            {
+                "num": movimiento["Num_cheque"] or "S/N",
+                "fecha": _fecha_bancaria(movimiento["fecha"]) or "N/D",
+                "descripcion": movimiento["descripcion"] or "Sin descripción",
+                "monto": movimiento["Monto"],
+            }
+            for movimiento in notas_debito_no_ingresadas
+        ]
+        depositos_banco_sin_registro = [
+            {
+                "num": movimiento["Num_cheque"] or "S/N",
+                "fecha": _fecha_bancaria(movimiento["fecha"]) or "N/D",
+                "descripcion": movimiento["descripcion"] or "Sin descripción",
+                "monto": movimiento["Monto"],
+            }
+            for movimiento in depositos_banco_sin_registro
+        ]
+        for fila in depositos_no_ingresados:
+            fila["diferencia"] = "Pendiente en banco"
+        for fila in depositos_banco_sin_registro:
+            fila["diferencia"] = "No registrado localmente"
+        diferencias_depositos = depositos_no_ingresados + depositos_banco_sin_registro
+
+        for fila in notas_locales_sin_banco:
+            fila["diferencia"] = "No aparece en el banco"
+        for fila in notas_debito_no_ingresadas:
+            fila["diferencia"] = "No registrada localmente"
+        diferencias_notas_debito = notas_locales_sin_banco + notas_debito_no_ingresadas
+        cheques_cobrados = [
+            cheque for cheque in cheques if cheque["resultado"] not in {"TRANSITO", "ANULADO"}
+        ]
+        # Un estado mensual no permite saber si un cheque histórico se cobró en
+        # un estado anterior. Mostrar todos como pendientes produciría miles de
+        # falsos tránsitos después de una importación histórica.
+        inicio_estado = estado_banco["fecha_inicio"]
+        numeros_emitidos_en_periodo = set(
+            df_nuestro.loc[
+                df_nuestro["Fecha_dt"].notna()
+                & (
+                    df_nuestro["Fecha_dt"] >= pd.Timestamp(inicio_estado)
+                    if inicio_estado
+                    else True
+                ),
+                "Num_norm",
+            ].dropna()
+        )
+        cheques_transito = [
+            cheque
+            for cheque in cheques
+            if cheque["resultado"] == "TRANSITO"
+            and cheque["num"] in numeros_emitidos_en_periodo
+        ]
+
+        def resumen(filas):
+            return {
+                "cantidad": len(filas),
+                "total": sum(
+                    (fila.get("monto_nuestro", fila.get("monto")) or Decimal("0.00") for fila in filas),
+                    Decimal("0.00"),
+                ),
+            }
+
         return {
             "cuenta": cuenta,
             "fecha_corte": fecha_corte,
+            "estado_cuenta": {
+                "numero": estado_banco["cuenta_numero"],
+                "nombre": estado_banco["cuenta_nombre"],
+                "fecha_inicio": estado_banco["fecha_inicio"],
+                "fecha_fin": estado_banco["fecha_fin"],
+                "moneda": moneda,
+            },
             "cheques": cheques,
             "no_registrados": no_registrados,
+            "cheques_cobrados": cheques_cobrados,
+            "cheques_transito": cheques_transito,
+            "depositos_no_ingresados": depositos_no_ingresados,
+            "notas_debito_no_ingresadas": notas_debito_no_ingresadas,
+            "depositos_banco_sin_registro": depositos_banco_sin_registro,
+            "notas_debito_locales_sin_banco": notas_locales_sin_banco,
+            "diferencias_depositos": diferencias_depositos,
+            "diferencias_notas_debito": diferencias_notas_debito,
+            "resumen": {
+                "cheques_cobrados": resumen(cheques_cobrados),
+                "cheques_transito": resumen(cheques_transito),
+                "depositos_no_ingresados": resumen(depositos_no_ingresados),
+                "notas_debito_no_ingresadas": resumen(notas_debito_no_ingresadas),
+                "diferencias_depositos": resumen(diferencias_depositos),
+                "diferencias_notas_debito": resumen(diferencias_notas_debito),
+            },
         }
 
     except ErrorOperacion:
