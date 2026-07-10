@@ -144,11 +144,18 @@ class ConciliadorApp(tk.Tk):
             "<Return>", lambda _evento: self.reimprimir_cheque()
         )
 
-        historial = ttk.LabelFrame(contenedor, text="Cheques recientes", padding=10)
+        historial = ttk.LabelFrame(
+            contenedor, text="Historial de cheques", padding=10
+        )
         historial.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-        historial.rowconfigure(0, weight=1)
+        historial.rowconfigure(1, weight=1)
         historial.columnconfigure(0, weight=1)
-        self.tabla_cheques = self._tabla(historial, ("Num", "Fecha", "Nombre", "Monto", "Estado"))
+        self.busqueda_cheques, panel_tabla = self._buscador_historial(
+            historial, self._cargar_cheques
+        )
+        self.tabla_cheques = self._tabla(
+            panel_tabla, ("Num", "Fecha", "Nombre", "Monto", "Estado")
+        )
         acciones = ttk.Frame(historial)
         acciones.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         acciones.columnconfigure((0, 1), weight=1)
@@ -203,13 +210,16 @@ class ConciliadorApp(tk.Tk):
         )
 
         historial = ttk.LabelFrame(
-            contenedor, text="Depósitos recientes", padding=10
+            contenedor, text="Historial de depósitos", padding=10
         )
         historial.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-        historial.rowconfigure(0, weight=1)
+        historial.rowconfigure(1, weight=1)
         historial.columnconfigure(0, weight=1)
+        self.busqueda_depositos, panel_tabla = self._buscador_historial(
+            historial, self._cargar_depositos
+        )
         self.tabla_depositos = self._tabla(
-            historial, ("Num", "Fecha", "Descripcion", "Monto", "Estado")
+            panel_tabla, ("Num", "Fecha", "Descripcion", "Monto", "Estado")
         )
         acciones = ttk.Frame(historial)
         acciones.grid(row=2, column=0, sticky="ew", pady=(8, 0))
@@ -264,12 +274,17 @@ class ConciliadorApp(tk.Tk):
             "<Return>", lambda _evento: self.anular_nota_debito()
         )
 
-        historial = ttk.LabelFrame(contenedor, text="Notas de débito recientes", padding=10)
+        historial = ttk.LabelFrame(
+            contenedor, text="Historial de notas de débito", padding=10
+        )
         historial.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-        historial.rowconfigure(0, weight=1)
+        historial.rowconfigure(1, weight=1)
         historial.columnconfigure(0, weight=1)
+        self.busqueda_notas_debito, panel_tabla = self._buscador_historial(
+            historial, self._cargar_notas_debito
+        )
         self.tabla_notas_debito = self._tabla(
-            historial, ("Num", "Fecha", "Descripcion", "Monto", "Estado")
+            panel_tabla, ("Num", "Fecha", "Descripcion", "Monto", "Estado")
         )
         acciones = ttk.Frame(historial)
         acciones.grid(row=2, column=0, sticky="ew", pady=(8, 0))
@@ -415,6 +430,44 @@ class ConciliadorApp(tk.Tk):
         selector = ttk.Combobox(padre, width=9, values=valores)
         selector.current(0)
         return selector
+
+    def _buscador_historial(self, padre, cargar):
+        buscador = ttk.Frame(padre)
+        buscador.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        buscador.columnconfigure(0, weight=1)
+        ttk.Label(
+            buscador,
+            text=(
+                "Buscar en todo el historial por número, fecha, texto, "
+                "monto o estado:"
+            ),
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        entrada = ttk.Entry(buscador)
+        entrada.grid(row=1, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(buscador, text="Buscar", command=cargar).grid(
+            row=1, column=1, padx=4
+        )
+        ttk.Button(
+            buscador,
+            text="Limpiar",
+            command=lambda: self._limpiar_busqueda(entrada, cargar),
+        ).grid(row=1, column=2, padx=(4, 0))
+        entrada.bind("<Return>", lambda _evento: cargar())
+        entrada.bind(
+            "<Escape>",
+            lambda _evento: self._limpiar_busqueda(entrada, cargar),
+        )
+
+        panel_tabla = ttk.Frame(padre)
+        panel_tabla.grid(row=1, column=0, sticky="nsew")
+        panel_tabla.rowconfigure(0, weight=1)
+        panel_tabla.columnconfigure(0, weight=1)
+        return entrada, panel_tabla
+
+    def _limpiar_busqueda(self, entrada, cargar):
+        entrada.delete(0, tk.END)
+        cargar()
+        entrada.focus_set()
 
     @staticmethod
     def _fin_de_mes(valor):
@@ -1101,14 +1154,23 @@ class ConciliadorApp(tk.Tk):
 
     def _cargar_cheques(self):
         self._limpiar_tabla(self.tabla_cheques)
-        df = service.obtener_cheques(self.cuenta_id_actual())
+        busqueda = self.busqueda_cheques.get().strip()
+        df = service.obtener_cheques(
+            self.cuenta_id_actual(), busqueda or None
+        )
         self.cheques_por_id = {}
         if df.empty:
             self._mostrar_estado_vacio(
-                self.tabla_cheques, "No hay cheques registrados"
+                self.tabla_cheques,
+                (
+                    "No se encontraron cheques"
+                    if busqueda
+                    else "No hay cheques registrados"
+                ),
             )
             return
-        for _, fila in df.tail(30).iloc[::-1].iterrows():
+        filas = df.iloc[::-1] if busqueda else df.tail(30).iloc[::-1]
+        for _, fila in filas.iterrows():
             cheque_id = int(fila["Id"])
             self.cheques_por_id[cheque_id] = {
                 "id": cheque_id,
@@ -1128,14 +1190,23 @@ class ConciliadorApp(tk.Tk):
 
     def _cargar_depositos(self):
         self._limpiar_tabla(self.tabla_depositos)
-        df = service.obtener_depositos(self.cuenta_id_actual())
+        busqueda = self.busqueda_depositos.get().strip()
+        df = service.obtener_depositos(
+            self.cuenta_id_actual(), busqueda or None
+        )
         self.depositos_por_id = {}
         if df.empty:
             self._mostrar_estado_vacio(
-                self.tabla_depositos, "No hay depósitos registrados"
+                self.tabla_depositos,
+                (
+                    "No se encontraron depósitos"
+                    if busqueda
+                    else "No hay depósitos registrados"
+                ),
             )
             return
-        for _, fila in df.tail(30).iloc[::-1].iterrows():
+        filas = df.iloc[::-1] if busqueda else df.tail(30).iloc[::-1]
+        for _, fila in filas.iterrows():
             deposito_id = int(fila["Id"])
             self.depositos_por_id[deposito_id] = {
                 "id": deposito_id,
@@ -1159,12 +1230,23 @@ class ConciliadorApp(tk.Tk):
 
     def _cargar_notas_debito(self):
         self._limpiar_tabla(self.tabla_notas_debito)
-        df = service.obtener_notas_debito(self.cuenta_id_actual())
+        busqueda = self.busqueda_notas_debito.get().strip()
+        df = service.obtener_notas_debito(
+            self.cuenta_id_actual(), busqueda or None
+        )
         self.notas_debito_por_id = {}
         if df.empty:
-            self._mostrar_estado_vacio(self.tabla_notas_debito, "No hay notas de débito registradas")
+            self._mostrar_estado_vacio(
+                self.tabla_notas_debito,
+                (
+                    "No se encontraron notas de débito"
+                    if busqueda
+                    else "No hay notas de débito registradas"
+                ),
+            )
             return
-        for _, fila in df.tail(30).iloc[::-1].iterrows():
+        filas = df.iloc[::-1] if busqueda else df.tail(30).iloc[::-1]
+        for _, fila in filas.iterrows():
             nota_id = int(fila["Id"])
             self.notas_debito_por_id[nota_id] = {
                 "id": nota_id,

@@ -1,4 +1,5 @@
 import sqlite3
+import unicodedata
 from datetime import datetime
 
 import pandas as pd
@@ -26,13 +27,46 @@ def crear_dataframe_vacio(columnas):
     df["Fecha_dt"] = pd.to_datetime(pd.Series(dtype=object))
     return df
 
-def cargar_cheques_registrados(cuenta_id=None):
+def _normalizar_texto_busqueda(valor):
+    texto = unicodedata.normalize("NFKD", str(valor or "")).casefold()
+    return "".join(
+        caracter for caracter in texto
+        if not unicodedata.combining(caracter)
+    )
+
+
+def _patron_busqueda(termino):
+    termino = _normalizar_texto_busqueda(str(termino or "").strip())
+    if not termino:
+        return None
+    termino = (
+        termino.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    return f"%{termino}%"
+
+
+def _condicion_busqueda(columnas):
+    return "(" + " OR ".join(
+        f"NORMALIZAR_BUSQUEDA(COALESCE({columna}, '')) LIKE ? ESCAPE '\\'"
+        for columna in columnas
+    ) + ")"
+
+
+def cargar_cheques_registrados(cuenta_id=None, busqueda=None):
     columnas = COLUMNAS_CHEQUES
     vacio = crear_dataframe_vacio(columnas)
     vacio["Num_norm"] = pd.Series(dtype=object)
+    patron = _patron_busqueda(busqueda)
 
     inicializar_db()
     with conectar_db() as conexion:
+        if patron is not None:
+            conexion.create_function(
+                "NORMALIZAR_BUSQUEDA", 1, _normalizar_texto_busqueda,
+                deterministic=True,
+            )
         consulta = """
             SELECT c.id AS Id, c.cuenta_id AS Cuenta_id, cb.banco AS Banco,
                    cb.nombre AS Cuenta, c.numero AS Num, c.fecha AS Fecha,
@@ -41,10 +75,20 @@ def cargar_cheques_registrados(cuenta_id=None):
             FROM cheques c
             JOIN cuentas_bancarias cb ON cb.id = c.cuenta_id
         """
-        parametros = ()
+        condiciones = []
+        parametros = []
         if cuenta_id is not None:
-            consulta += " WHERE c.cuenta_id = ?"
-            parametros = (obtener_cuenta(cuenta_id)["id"],)
+            condiciones.append("c.cuenta_id = ?")
+            parametros.append(obtener_cuenta(cuenta_id)["id"])
+        if patron is not None:
+            columnas_busqueda = (
+                "c.numero", "c.fecha", "c.nombre", "c.descripcion",
+                "c.monto", "c.estado",
+            )
+            condiciones.append(_condicion_busqueda(columnas_busqueda))
+            parametros.extend([patron] * len(columnas_busqueda))
+        if condiciones:
+            consulta += " WHERE " + " AND ".join(condiciones)
         consulta += " ORDER BY c.id"
         filas = conexion.execute(consulta, parametros).fetchall()
     if not filas:
@@ -57,11 +101,17 @@ def cargar_cheques_registrados(cuenta_id=None):
 
     return df
 
-def _cargar_movimientos_registrados(tabla, alias, cuenta_id=None):
+def _cargar_movimientos_registrados(tabla, alias, cuenta_id=None, busqueda=None):
     vacio = crear_dataframe_vacio(COLUMNAS_MOVIMIENTOS)
+    patron = _patron_busqueda(busqueda)
 
     inicializar_db()
     with conectar_db() as conexion:
+        if patron is not None:
+            conexion.create_function(
+                "NORMALIZAR_BUSQUEDA", 1, _normalizar_texto_busqueda,
+                deterministic=True,
+            )
         consulta = f"""
             SELECT {alias}.id AS Id, {alias}.cuenta_id AS Cuenta_id,
                    cb.banco AS Banco, cb.nombre AS Cuenta,
@@ -71,10 +121,20 @@ def _cargar_movimientos_registrados(tabla, alias, cuenta_id=None):
             FROM {tabla} {alias}
             JOIN cuentas_bancarias cb ON cb.id = {alias}.cuenta_id
         """
-        parametros = ()
+        condiciones = []
+        parametros = []
         if cuenta_id is not None:
-            consulta += f" WHERE {alias}.cuenta_id = ?"
-            parametros = (obtener_cuenta(cuenta_id)["id"],)
+            condiciones.append(f"{alias}.cuenta_id = ?")
+            parametros.append(obtener_cuenta(cuenta_id)["id"])
+        if patron is not None:
+            columnas_busqueda = (
+                f"{alias}.numero", f"{alias}.fecha",
+                f"{alias}.descripcion", f"{alias}.monto", f"{alias}.estado",
+            )
+            condiciones.append(_condicion_busqueda(columnas_busqueda))
+            parametros.extend([patron] * len(columnas_busqueda))
+        if condiciones:
+            consulta += " WHERE " + " AND ".join(condiciones)
         consulta += f" ORDER BY {alias}.id"
         filas = conexion.execute(consulta, parametros).fetchall()
     if not filas:
@@ -86,12 +146,16 @@ def _cargar_movimientos_registrados(tabla, alias, cuenta_id=None):
     return df
 
 
-def cargar_depositos_registrados(cuenta_id=None):
-    return _cargar_movimientos_registrados("depositos", "d", cuenta_id)
+def cargar_depositos_registrados(cuenta_id=None, busqueda=None):
+    return _cargar_movimientos_registrados(
+        "depositos", "d", cuenta_id, busqueda
+    )
 
 
-def cargar_notas_debito_registradas(cuenta_id=None):
-    return _cargar_movimientos_registrados("notas_debito", "n", cuenta_id)
+def cargar_notas_debito_registradas(cuenta_id=None, busqueda=None):
+    return _cargar_movimientos_registrados(
+        "notas_debito", "n", cuenta_id, busqueda
+    )
 
 def registrar_nota_debito_datos(monto, descripcion, fecha=None, cuenta_id=None, numero=None):
     cuenta = obtener_cuenta(cuenta_id)
