@@ -19,6 +19,14 @@ PATRON_PERIODO_BI = re.compile(
 PATRON_MONEDA_BI = re.compile(r"\((GTQ|USD)\)", re.IGNORECASE)
 
 
+def _texto_celda(valor):
+    if pd.isna(valor):
+        return ""
+    if isinstance(valor, float) and valor.is_integer():
+        return str(int(valor))
+    return str(valor).strip()
+
+
 def _normalizar_numero_cuenta(valor):
     """Normaliza la presentación del número sin alterar su valor bancario."""
     digitos = re.sub(r"\D", "", str(valor or ""))
@@ -104,8 +112,7 @@ def _leer_csv_banco_industrial(archivo):
         haber_original = fila[columnas["haber"]].strip()
         if not debe_original and not haber_original:
             continue
-        monto_original = debe_original or haber_original
-        monto = convertir_monto(monto_original)
+        monto = convertir_monto(debe_original or haber_original)
         if monto is None and tipo != "CQ":
             continue
         movimiento = {
@@ -140,9 +147,96 @@ def _leer_csv_banco_industrial(archivo):
     }
 
 
+def _leer_xls_gt_continental(archivo):
+    """Convierte el estado por rango de fechas exportado por G&T."""
+    tabla = pd.read_excel(archivo, header=None, dtype=object, engine="xlrd")
+    cuenta_numero = None
+    cuenta_nombre = None
+    fecha_inicio = None
+    fecha_fin = None
+    moneda = "GTQ"
+    indice_cabecera = None
+
+    for indice, fila in tabla.iterrows():
+        valores = [_texto_celda(valor) for valor in fila]
+        for posicion, valor in enumerate(valores):
+            etiqueta = valor.casefold()
+            siguiente = next(
+                (item for item in valores[posicion + 1:] if item), ""
+            )
+            if etiqueta == "#cuenta":
+                cuenta_numero = siguiente
+            elif etiqueta == "nombre de la cuenta":
+                cuenta_nombre = siguiente
+            elif etiqueta == "fecha inicial":
+                fecha_inicio = _fecha_bancaria(siguiente)
+            elif etiqueta == "fecha final":
+                fecha_fin = _fecha_bancaria(siguiente)
+        if "monetario (usd)" in " ".join(valores).casefold():
+            moneda = "USD"
+        normalizados = {valor.casefold() for valor in valores}
+        if {"fecha", "referencia", "descripción", "débito", "crédito"} <= normalizados:
+            indice_cabecera = indice
+            break
+
+    if indice_cabecera is None:
+        raise ErrorOperacion(
+            "⚠️ El estado de G&T Continental no contiene las columnas esperadas."
+        )
+
+    cabecera = [_texto_celda(valor).casefold() for valor in tabla.iloc[indice_cabecera]]
+    columnas = {nombre: indice for indice, nombre in enumerate(cabecera) if nombre}
+    cheques = []
+    depositos = []
+    notas_debito = []
+    for _, fila in tabla.iloc[indice_cabecera + 1:].iterrows():
+        fecha = _texto_celda(fila.iloc[columnas["fecha"]])
+        referencia = _texto_celda(fila.iloc[columnas["referencia"]])
+        descripcion = _texto_celda(fila.iloc[columnas["descripción"]])
+        debito = convertir_monto(fila.iloc[columnas["débito"]])
+        credito = convertir_monto(fila.iloc[columnas["crédito"]])
+        if not fecha or (debito is None and credito is None):
+            continue
+        descripcion_norm = descripcion.casefold()
+        movimiento = {
+            "Num_cheque": referencia,
+            "Monto": abs(debito if debito is not None else credito),
+            "fecha": fecha,
+            "descripcion": descripcion,
+        }
+        if debito is not None and (
+            "pago de cheque" in descripcion_norm
+            or "cheque propio en consignacion" in descripcion_norm
+        ):
+            movimiento["tipo"] = "CQ"
+            cheques.append(movimiento)
+        elif credito is not None:
+            movimiento["tipo"] = "DP"
+            depositos.append(movimiento)
+        else:
+            movimiento["tipo"] = "ND"
+            notas_debito.append(movimiento)
+
+    return {
+        "cheques": pd.DataFrame(
+            cheques,
+            columns=["Num_cheque", "Monto", "fecha", "tipo", "descripcion"],
+        ),
+        "otros_cargos": [],
+        "depositos": depositos,
+        "notas_debito": notas_debito,
+        "cuenta_numero": cuenta_numero,
+        "cuenta_nombre": cuenta_nombre,
+        "fecha_inicio": fecha_inicio,
+        "fecha_fin": fecha_fin,
+        "moneda": moneda,
+    }
 LECTORES_ESTADO_CUENTA = {
     "Banco Industrial": {
         ".csv": _leer_csv_banco_industrial,
+    },
+    "G&T Continental": {
+        ".xls": _leer_xls_gt_continental,
     },
 }
 

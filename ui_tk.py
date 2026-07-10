@@ -899,6 +899,7 @@ class ConciliadorApp(tk.Tk):
             title="Seleccionar estado de cuenta",
             filetypes=[
                 ("Banco Industrial CSV", "*.csv"),
+                ("G&T Continental XLS", "*.xls"),
             ],
         )
         if not archivo:
