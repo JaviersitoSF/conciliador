@@ -10,7 +10,7 @@ from .printing import FORMATO_IMPRESION_DEFAULT, validar_formato_impresion
 ARCHIVO_DATOS = "conciliador.db"
 DIRECTORIO_RESPALDOS = "respaldos"
 MAX_RESPALDOS = 10
-FORMATOS_CONCILIACION = ("Banco Industrial", "G&T Continental")
+FORMATOS_CONCILIACION = ("Banco Industrial", "G&T Continental", "Banrural")
 FORMATO_CONCILIACION_DEFAULT = FORMATOS_CONCILIACION[0]
 
 
@@ -49,7 +49,7 @@ def inicializar_db():
                 nombre TEXT NOT NULL,
                 numero TEXT NOT NULL DEFAULT '',
                 formato_conciliacion TEXT NOT NULL DEFAULT 'Banco Industrial'
-                    CHECK (formato_conciliacion IN ('Banco Industrial', 'G&T Continental')),
+                    CHECK (formato_conciliacion IN ('Banco Industrial', 'G&T Continental', 'Banrural')),
                 activa INTEGER NOT NULL DEFAULT 1 CHECK (activa IN (0, 1)),
                 creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (banco, nombre, numero)
@@ -136,7 +136,7 @@ def inicializar_db():
             conexion.execute(
                 "ALTER TABLE cuentas_bancarias ADD COLUMN formato_conciliacion "
                 "TEXT NOT NULL DEFAULT 'Banco Industrial' "
-                "CHECK (formato_conciliacion IN ('Banco Industrial', 'G&T Continental'))"
+                "CHECK (formato_conciliacion IN ('Banco Industrial', 'G&T Continental', 'Banrural'))"
             )
         conexion.execute(
             """

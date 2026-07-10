@@ -17,6 +17,13 @@ PATRON_PERIODO_BI = re.compile(
     re.IGNORECASE,
 )
 PATRON_MONEDA_BI = re.compile(r"\((GTQ|USD)\)", re.IGNORECASE)
+PATRON_PERIODO_BANRURAL = re.compile(
+    r"^Del\s+(\d{2}/\d{2}/\d{4})\s+al\s+(\d{2}/\d{2}/\d{4})$",
+    re.IGNORECASE,
+)
+PATRON_CUENTA_BANRURAL = re.compile(
+    r"^Cuenta:\s*([^-]+)-(.*?)-(.*?)-(GTQ|USD)\s*$", re.IGNORECASE
+)
 
 
 def _texto_celda(valor):
@@ -231,12 +238,107 @@ def _leer_xls_gt_continental(archivo):
         "fecha_fin": fecha_fin,
         "moneda": moneda,
     }
+
+
+def _leer_csv_banrural(archivo):
+    """Convierte el CSV de movimientos de cuenta exportado por Banrural."""
+    contenido = None
+    for codificacion in ("utf-8-sig", "latin-1"):
+        try:
+            contenido = Path(archivo).read_text(encoding=codificacion)
+            break
+        except UnicodeDecodeError:
+            continue
+    if contenido is None:
+        raise ErrorOperacion(
+            "⚠️ No se pudo reconocer la codificación del archivo de Banrural."
+        )
+
+    filas = list(csv.reader(contenido.splitlines()))
+    cuenta_numero = cuenta_nombre = fecha_inicio = fecha_fin = moneda = None
+    indice_cabecera = None
+    for indice, fila in enumerate(filas):
+        primera = str(fila[0] if fila else "").strip()
+        periodo = PATRON_PERIODO_BANRURAL.match(primera)
+        if periodo:
+            fecha_inicio = _fecha_bancaria(periodo.group(1))
+            fecha_fin = _fecha_bancaria(periodo.group(2))
+        cuenta = PATRON_CUENTA_BANRURAL.match(primera)
+        if cuenta:
+            cuenta_numero, _tipo_cuenta, cuenta_nombre, moneda = cuenta.groups()
+        if primera.casefold() == "fecha":
+            indice_cabecera = indice
+            break
+
+    if indice_cabecera is None:
+        raise ErrorOperacion(
+            "⚠️ El archivo no contiene la cabecera de movimientos de Banrural."
+        )
+
+    cabecera = [str(valor).strip().casefold() for valor in filas[indice_cabecera]]
+    columnas = {nombre: indice for indice, nombre in enumerate(cabecera)}
+    requeridas = {
+        "fecha", "descripción", "referencia",
+        "cheque propio / local / efectivo", "débito (-)", "crédito (+)",
+    }
+    if not requeridas <= columnas.keys():
+        raise ErrorOperacion(
+            "⚠️ El estado de Banrural no contiene todas las columnas esperadas."
+        )
+
+    cheques, depositos, notas_debito = [], [], []
+    for fila in filas[indice_cabecera + 1:]:
+        fila += [""] * (len(cabecera) - len(fila))
+        fecha = fila[columnas["fecha"]].strip()
+        if not fecha or _fecha_bancaria(fecha) is None:
+            continue
+        descripcion = fila[columnas["descripción"]].strip()
+        referencia = fila[columnas["referencia"]].strip()
+        cheque = fila[columnas["cheque propio / local / efectivo"]].strip()
+        debito = convertir_monto(fila[columnas["débito (-)"]])
+        credito = convertir_monto(fila[columnas["crédito (+)"]])
+        if debito is not None and debito != 0:
+            movimiento = {
+                "Num_cheque": cheque or referencia,
+                "Monto": abs(debito), "fecha": fecha,
+                "descripcion": descripcion,
+            }
+            if normalizar_numero_cheque(cheque):
+                movimiento["tipo"] = "CQ"
+                cheques.append(movimiento)
+            else:
+                movimiento["tipo"] = "ND"
+                notas_debito.append(movimiento)
+        elif credito is not None and credito != 0:
+            depositos.append({
+                "Num_cheque": referencia, "Monto": abs(credito),
+                "fecha": fecha, "tipo": "DP", "descripcion": descripcion,
+            })
+
+    return {
+        "cheques": pd.DataFrame(
+            cheques, columns=["Num_cheque", "Monto", "fecha", "tipo", "descripcion"]
+        ),
+        "otros_cargos": [],
+        "depositos": depositos,
+        "notas_debito": notas_debito,
+        "cuenta_numero": cuenta_numero,
+        "cuenta_nombre": cuenta_nombre,
+        "fecha_inicio": fecha_inicio,
+        "fecha_fin": fecha_fin,
+        "moneda": (moneda or "GTQ").upper(),
+    }
+
+
 LECTORES_ESTADO_CUENTA = {
     "Banco Industrial": {
         ".csv": _leer_csv_banco_industrial,
     },
     "G&T Continental": {
         ".xls": _leer_xls_gt_continental,
+    },
+    "Banrural": {
+        ".csv": _leer_csv_banrural,
     },
 }
 
@@ -245,6 +347,14 @@ def _fecha_bancaria(valor):
     """Devuelve una fecha comparable para las fechas dd-mm-AAAA de BI."""
     fecha = pd.to_datetime(valor, dayfirst=True, errors="coerce")
     return None if pd.isna(fecha) else fecha.date().isoformat()
+
+
+def _cuentas_coinciden(numero_archivo, numero_configurado):
+    archivo = _normalizar_numero_cuenta(numero_archivo)
+    configurado = _normalizar_numero_cuenta(numero_configurado)
+    if "x" in str(numero_archivo).casefold():
+        return bool(archivo) and configurado.endswith(archivo)
+    return archivo == configurado
 
 
 def _separar_movimientos_no_ingresados(locales, bancarios, fecha_inicio, fecha_corte):
@@ -344,9 +454,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
         numero_archivo = estado_banco["cuenta_numero"]
         numero_configurado = str(cuenta.get("numero") or "").strip()
         if numero_archivo and numero_configurado:
-            if _normalizar_numero_cuenta(
-                numero_archivo
-            ) != _normalizar_numero_cuenta(numero_configurado):
+            if not _cuentas_coinciden(numero_archivo, numero_configurado):
                 raise ErrorOperacion(
                     f"⚠️ El estado pertenece a la cuenta {numero_archivo}, no a la cuenta seleccionada {numero_configurado}."
                 )
