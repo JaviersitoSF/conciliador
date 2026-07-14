@@ -118,10 +118,11 @@ def abrir_pdf_silenciosamente(comando):
             check=True,
         )
     except subprocess.CalledProcessError as exc:
-        detalle = (exc.stderr or exc.stdout or "").strip()
+        detalle_error = getattr(exc, "stderr", "")
+        detalle = str(detalle_error).strip() if detalle_error else ""
         if detalle:
             raise RuntimeError(detalle) from exc
-        raise RuntimeError(f"el comando fallo con codigo {exc.returncode}") from exc
+        raise RuntimeError("No se pudo completar el comando de impresión.") from exc
 
 
 def abrir_pdf(ruta):
@@ -494,11 +495,16 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
         ])
     sin_cheques = not cheques_resumen
     if sin_cheques:
-        datos_cheques.append([_parrafo("Sin cheques en circulación", estilo_celda), "", "", ""])
+        datos_cheques.append([
+            _parrafo("Sin cheques en circulación", estilo_celda),
+            _parrafo("", estilo_celda),
+            _parrafo("", estilo_celda),
+            _parrafo("", estilo_celda),
+        ])
     datos_cheques.append([
         _parrafo("TOTAL CHEQUES EN CIRCULACIÓN", estilo_celda_derecha),
-        "",
-        "",
+        _parrafo("", estilo_celda),
+        _parrafo("", estilo_celda),
         _parrafo(
             _monto_resumen(resumen["cheques_transito"], simbolo),
             estilo_celda_derecha,
@@ -576,7 +582,10 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
             for fila in filas
         )
         if not filas:
-            datos.append([_parrafo("Sin registros", estilo_celda)] + [""] * (len(encabezados) - 1))
+            datos.append([
+                _parrafo("Sin registros" if indice == 0 else "", estilo_celda)
+                for indice in range(len(encabezados))
+            ])
         tabla = _tabla_pdf(datos, anchos, filas_vacias=not filas)
         elementos.extend((tabla, Spacer(1, 0.25 * cm)))
 
@@ -604,7 +613,11 @@ def imprimir_cheque_pdf(
         pdf = canvas.Canvas(str(nombre_pdf), pagesize=(ancho_cheque, alto_cheque))
     monto_formateado = formatear_monto_impresion(monto)
     entero, centavos = formatear_monto(monto).split(".")
-    monto_en_letras = num2words(int(entero), lang="es").upper()
+    try:
+        monto_entero = int(entero)
+    except (TypeError, ValueError) as exc:
+        raise ErrorOperacion("El monto del cheque no es válido.") from exc
+    monto_en_letras = num2words(monto_entero, lang="es").upper()
     texto_oficial = f"{monto_en_letras} QUETZALES CON {centavos}/100"
     pdf.drawString(
         formato["fecha_x"] * cm,
@@ -630,11 +643,15 @@ def imprimir_cheque_pdf(
     )
     pdf.setFont("Helvetica", 10)
     if descripcion:
-        pdf.drawString(
+        texto_descripcion = pdf.beginText(
             formato["descripcion_x"] * cm,
             formato["descripcion_y"] * cm,
-            descripcion,
         )
+        texto_descripcion.setFont("Helvetica", 10)
+        texto_descripcion.setLeading(12)
+        for linea in str(descripcion).splitlines() or [""]:
+            texto_descripcion.textLine(linea)
+        pdf.drawText(texto_descripcion)
     pdf.save()
     print(f"🖨️  PDF generado: {nombre_pdf}")
     try:

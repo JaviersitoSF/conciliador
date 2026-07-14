@@ -93,7 +93,11 @@ class ConciliadorApp(tk.Tk):
         cheque.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.cheque_num = self._campo(cheque, "Número de cheque", 0)
         self.cheque_nombre = self._campo(cheque, "Páguese a", 1)
-        self.cheque_descripcion = self._campo(cheque, "Descripción", 2)
+        ttk.Label(cheque, text="Descripción").grid(
+            row=2, column=0, sticky="w", padx=(0, 12), pady=6
+        )
+        self.cheque_descripcion = tk.Text(cheque, width=38, height=4, wrap="word")
+        self.cheque_descripcion.grid(row=2, column=1, sticky="ew", pady=6)
         self.cheque_monto = self._campo(cheque, "Monto", 3)
         self.cheque_fecha = self._campo(cheque, "Fecha (AAAA-MM-DD)", 4)
         self.cheque_fecha.insert(0, date.today().isoformat())
@@ -410,6 +414,13 @@ class ConciliadorApp(tk.Tk):
             notas, ("Numero", "Fecha", "Descripcion", "Monto", "Diferencia")
         )
 
+    @staticmethod
+    def _entero(valor, mensaje="Identificador inválido"):
+        try:
+            return int(valor)
+        except (TypeError, ValueError) as exc:
+            raise core.ErrorOperacion(mensaje) from exc
+
     def _campo(self, padre, etiqueta, fila):
         ttk.Label(padre, text=etiqueta).grid(row=fila, column=0, sticky="w", pady=5)
         entrada = ttk.Entry(padre)
@@ -569,7 +580,10 @@ class ConciliadorApp(tk.Tk):
         )
 
     def _emitir_cheque(self):
-        descripcion = self.cheque_descripcion.get().strip()
+        if isinstance(self.cheque_descripcion, tk.Text):
+            descripcion = self.cheque_descripcion.get("1.0", "end-1c").strip()
+        else:
+            descripcion = self.cheque_descripcion.get().strip()
         if not descripcion:
             messagebox.showerror(
                 "No se pudo emitir",
@@ -591,7 +605,10 @@ class ConciliadorApp(tk.Tk):
             return
         self.cheque_num.delete(0, tk.END)
         self.cheque_nombre.delete(0, tk.END)
-        self.cheque_descripcion.delete(0, tk.END)
+        if isinstance(self.cheque_descripcion, tk.Text):
+            self.cheque_descripcion.delete("1.0", tk.END)
+        else:
+            self.cheque_descripcion.delete(0, tk.END)
         self.cheque_monto.delete(0, tk.END)
         self.cheque_fecha.delete(0, tk.END)
         self.cheque_fecha.insert(0, date.today().isoformat())
@@ -665,7 +682,7 @@ class ConciliadorApp(tk.Tk):
         )
         if item is None:
             return
-        cheque = self.cheques_por_id[int(item)]
+        cheque = self.cheques_por_id[ConciliadorApp._entero(item)]
         DialogoMovimiento(
             self,
             "Editar cheque",
@@ -704,7 +721,7 @@ class ConciliadorApp(tk.Tk):
         )
         if item is None:
             return
-        deposito = self.depositos_por_id[int(item)]
+        deposito = self.depositos_por_id[ConciliadorApp._entero(item)]
         DialogoMovimiento(
             self,
             "Editar depósito",
@@ -741,7 +758,7 @@ class ConciliadorApp(tk.Tk):
         item = self._movimiento_seleccionado(self.tabla_notas_debito, "Editar nota de débito")
         if item is None:
             return
-        nota = self.notas_debito_por_id[int(item)]
+        nota = self.notas_debito_por_id[ConciliadorApp._entero(item)]
         DialogoMovimiento(
             self,
             "Editar nota de débito",
@@ -768,7 +785,7 @@ class ConciliadorApp(tk.Tk):
         )
         if item is None:
             return
-        cheque = self.cheques_por_id[int(item)]
+        cheque = self.cheques_por_id[ConciliadorApp._entero(item)]
         confirmar = messagebox.askyesno(
             "Confirmar borrado",
             f"¿Desea borrar permanentemente el cheque {cheque['numero']} "
@@ -794,7 +811,7 @@ class ConciliadorApp(tk.Tk):
         )
         if item is None:
             return
-        deposito = self.depositos_por_id[int(item)]
+        deposito = self.depositos_por_id[ConciliadorApp._entero(item)]
         confirmar = messagebox.askyesno(
             "Confirmar borrado",
             f"¿Desea borrar permanentemente el depósito {deposito['numero']} "
@@ -818,7 +835,7 @@ class ConciliadorApp(tk.Tk):
         item = self._movimiento_seleccionado(self.tabla_notas_debito, "Borrar nota de débito")
         if item is None:
             return
-        nota = self.notas_debito_por_id[int(item)]
+        nota = self.notas_debito_por_id[ConciliadorApp._entero(item)]
         confirmar = messagebox.askyesno(
             "Confirmar borrado",
             f"¿Desea borrar permanentemente la nota de débito {nota['numero']} por Q {nota['monto']}?\n\nEsta acción no se puede deshacer.",
@@ -1081,7 +1098,7 @@ class ConciliadorApp(tk.Tk):
     def cuenta_id_actual(self, requerida=True):
         valor = self.selector_cuenta.get()
         if valor:
-            return int(valor.split("|", 1)[0].strip())
+            return ConciliadorApp._entero(valor.split("|", 1)[0].strip(), "La cuenta seleccionada no es válida.")
         if requerida:
             raise core.ErrorOperacion("No hay una cuenta bancaria seleccionada.")
         return None
@@ -1171,7 +1188,7 @@ class ConciliadorApp(tk.Tk):
             return
         filas = df.iloc[::-1] if busqueda else df.tail(30).iloc[::-1]
         for _, fila in filas.iterrows():
-            cheque_id = int(fila["Id"])
+            cheque_id = ConciliadorApp._entero(fila["Id"], "El cheque tiene un identificador inválido.")
             self.cheques_por_id[cheque_id] = {
                 "id": cheque_id,
                 "numero": fila["Num"],
@@ -1207,7 +1224,7 @@ class ConciliadorApp(tk.Tk):
             return
         filas = df.iloc[::-1] if busqueda else df.tail(30).iloc[::-1]
         for _, fila in filas.iterrows():
-            deposito_id = int(fila["Id"])
+            deposito_id = ConciliadorApp._entero(fila["Id"], "El depósito tiene un identificador inválido.")
             self.depositos_por_id[deposito_id] = {
                 "id": deposito_id,
                 "numero": fila["Num"],
@@ -1247,7 +1264,7 @@ class ConciliadorApp(tk.Tk):
             return
         filas = df.iloc[::-1] if busqueda else df.tail(30).iloc[::-1]
         for _, fila in filas.iterrows():
-            nota_id = int(fila["Id"])
+            nota_id = ConciliadorApp._entero(fila["Id"], "La nota de débito tiene un identificador inválido.")
             self.notas_debito_por_id[nota_id] = {
                 "id": nota_id,
                 "numero": fila["Num"],
@@ -1345,9 +1362,13 @@ class DialogoMovimiento(tk.Toplevel):
             ttk.Label(contenido, text=etiqueta).grid(
                 row=fila, column=0, sticky="w", padx=(0, 12), pady=6
             )
-            entrada = ttk.Entry(contenido, width=38)
+            if campo == "descripcion":
+                entrada = tk.Text(contenido, width=38, height=4, wrap="word")
+                entrada.insert("1.0", valores.get(campo, ""))
+            else:
+                entrada = ttk.Entry(contenido, width=38)
+                entrada.insert(0, valores.get(campo, ""))
             entrada.grid(row=fila, column=1, sticky="ew", pady=6)
-            entrada.insert(0, valores.get(campo, ""))
             self.entradas[campo] = entrada
 
         acciones = ttk.Frame(contenido)
@@ -1371,7 +1392,11 @@ class DialogoMovimiento(tk.Toplevel):
         if str(self.boton_guardar.cget("state")) == "disabled":
             return
         valores = {
-            campo: entrada.get().strip()
+            campo: (
+                entrada.get("1.0", "end-1c").strip()
+                if isinstance(entrada, tk.Text)
+                else entrada.get().strip()
+            )
             for campo, entrada in self.entradas.items()
         }
         self.boton_guardar.configure(state="disabled")
