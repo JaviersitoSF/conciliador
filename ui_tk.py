@@ -1117,16 +1117,18 @@ class ConciliadorApp(tk.Tk):
             return
         DialogoNuevaCuenta(
             self,
-            lambda banco, nombre, numero, formato: self._actualizar_cuenta(
-                cuenta_id, banco, nombre, numero, formato
+            lambda banco, nombre, numero, formato, moneda: self._actualizar_cuenta(
+                cuenta_id, banco, nombre, numero, formato, moneda
             ),
             cuenta=cuenta,
         )
 
-    def _registrar_cuenta(self, banco, nombre, numero, formato_conciliacion):
+    def _registrar_cuenta(
+        self, banco, nombre, numero, formato_conciliacion, moneda
+    ):
         try:
             cuenta_id = service.crear_cuenta(
-                banco, nombre, numero, formato_conciliacion
+                banco, nombre, numero, formato_conciliacion, moneda
             )
         except Exception as e:
             messagebox.showerror("No se pudo crear", str(e))
@@ -1144,11 +1146,11 @@ class ConciliadorApp(tk.Tk):
         return True
 
     def _actualizar_cuenta(
-        self, cuenta_id, banco, nombre, numero, formato_conciliacion
+        self, cuenta_id, banco, nombre, numero, formato_conciliacion, moneda
     ):
         try:
             service.actualizar_cuenta(
-                cuenta_id, banco, nombre, numero, formato_conciliacion
+                cuenta_id, banco, nombre, numero, formato_conciliacion, moneda
             )
         except Exception as e:
             messagebox.showerror("No se pudo actualizar", str(e))
@@ -1437,14 +1439,21 @@ class DialogoNuevaCuenta(tk.Toplevel):
         )
         self.formato_conciliacion.grid(row=3, column=1, sticky="ew", pady=6)
         self.formato_conciliacion.current(0)
+        self.es_dolares = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            contenido,
+            text="Cuenta en dólares (USD)",
+            variable=self.es_dolares,
+        ).grid(row=4, column=1, sticky="w", pady=6)
         if cuenta:
             self.banco.insert(0, cuenta["banco"])
             self.nombre.insert(0, cuenta["nombre"])
             self.numero.insert(0, cuenta["numero"])
             self.formato_conciliacion.set(cuenta["formato_conciliacion"])
+            self.es_dolares.set(cuenta.get("moneda", "GTQ") == "USD")
 
         acciones = ttk.Frame(contenido)
-        acciones.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(16, 0))
+        acciones.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(16, 0))
         ttk.Button(acciones, text="Cancelar", command=self.destroy).pack(
             side="right"
         )
@@ -1498,6 +1507,7 @@ class DialogoNuevaCuenta(tk.Toplevel):
                 nombre,
                 self.numero.get().strip(),
                 self.formato_conciliacion.get(),
+                "USD" if self.es_dolares.get() else "GTQ",
             )
         finally:
             if self.winfo_exists():

@@ -36,6 +36,7 @@ from .printing import (
 )
 from .storage import (
     FORMATOS_CONCILIACION,
+    MONEDAS,
     actualizar_cuenta_bancaria,
     crear_cuenta_bancaria,
     crear_respaldo,

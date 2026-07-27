@@ -349,6 +349,18 @@ def test_imprimir_pdf_cubre_linux_macos_windows_y_falla_de_apertura():
     assert (15 * cm, 13 * cm, "1,234,567.89") in pdf.textos
     ejecutar.assert_called_once()
 
+    pdf_dolares = PdfFalso()
+    with patch("conciliador.printing.canvas.Canvas", return_value=pdf_dolares), \
+            patch("conciliador.printing.platform.system", return_value="Linux"), \
+            patch("conciliador.printing.subprocess.run"):
+        main.imprimir_cheque_pdf(
+            "1", "2026-06-03", "A", "25.50", moneda="USD"
+        )
+    assert any(
+        texto.endswith("DÓLARES CON 50/100")
+        for _x, _y, texto in pdf_dolares.textos
+    )
+
     with patch("conciliador.printing.canvas.Canvas", return_value=PdfFalso()), \
             patch("conciliador.printing.platform.system", return_value="Darwin"), \
             patch("conciliador.printing.subprocess.run") as ejecutar:

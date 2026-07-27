@@ -676,6 +676,7 @@ def emitir_cheque_datos(
             descripcion,
             archivo_salida=nombre_pdf,
             formato=obtener_formato_impresion(cuenta["id"]),
+            moneda=cuenta["moneda"],
         )
     except Exception as e:
         raise ErrorOperacion(
@@ -738,6 +739,7 @@ def reimprimir_cheque_numero(num_cheque, cuenta_id=None):
         cheque["Descripcion"],
         archivo_salida=nombre_pdf,
         formato=obtener_formato_impresion(cuenta["id"]),
+        moneda=cuenta["moneda"],
     )
     with transaccion() as conexion:
         registrar_auditoria(

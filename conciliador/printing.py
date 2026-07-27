@@ -635,7 +635,8 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
 
 
 def imprimir_cheque_pdf(
-    num, fecha, nombre, monto, descripcion="", archivo_salida=None, formato=None
+    num, fecha, nombre, monto, descripcion="", archivo_salida=None, formato=None,
+    moneda="GTQ",
 ):
     formato = validar_formato_impresion(formato or FORMATO_IMPRESION_DEFAULT)
     alto_cheque = formato["alto"] * cm
@@ -656,7 +657,8 @@ def imprimir_cheque_pdf(
     except (TypeError, ValueError) as exc:
         raise ErrorOperacion("El monto del cheque no es válido.") from exc
     monto_en_letras = num2words(monto_entero, lang="es").upper()
-    texto_oficial = f"{monto_en_letras} QUETZALES CON {centavos}/100"
+    unidad_monetaria = "DÓLARES" if moneda == "USD" else "QUETZALES"
+    texto_oficial = f"{monto_en_letras} {unidad_monetaria} CON {centavos}/100"
     pdf.setFont(FUENTE_REGULAR, 10)
     pdf.drawString(
         formato["fecha_x"] * cm,

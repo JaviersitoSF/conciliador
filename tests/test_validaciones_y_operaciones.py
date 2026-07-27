@@ -121,6 +121,7 @@ def test_actualizar_cuenta_normaliza_datos_y_rechaza_duplicados():
         "nombre": "Cuenta editada",
         "numero": "009",
         "formato_conciliacion": "Banco Industrial",
+        "moneda": "GTQ",
         "activa": 1,
     }
 
@@ -128,6 +129,21 @@ def test_actualizar_cuenta_normaliza_datos_y_rechaza_duplicados():
         main.actualizar_cuenta_bancaria(
             cuenta_a, "BANCO B", "Ahorros", "002"
         )
+
+
+def test_cuenta_usa_quetzales_por_default_y_permite_dolares():
+    cuenta_gtq = main.crear_cuenta_bancaria("BANCO A", "Quetzales")
+    cuenta_usd = main.crear_cuenta_bancaria(
+        "BANCO A", "Dólares", moneda="USD"
+    )
+
+    assert main.obtener_cuenta(cuenta_gtq)["moneda"] == "GTQ"
+    assert main.obtener_cuenta(cuenta_usd)["moneda"] == "USD"
+
+    actualizada = main.actualizar_cuenta_bancaria(
+        cuenta_gtq, "BANCO A", "Quetzales", moneda="USD"
+    )
+    assert actualizada["moneda"] == "USD"
 
 
 def test_formato_rechaza_coordenadas_fuera_del_cheque():

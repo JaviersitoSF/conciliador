@@ -46,6 +46,8 @@ CREATE TABLE cuentas_bancarias (
     numero TEXT NOT NULL DEFAULT '',
     formato_conciliacion TEXT NOT NULL DEFAULT 'Banco Industrial'
         CHECK (formato_conciliacion IN ('Banco Industrial', 'G&T Continental', 'Banrural', 'BAC')),
+    moneda TEXT NOT NULL DEFAULT 'GTQ'
+        CHECK (moneda IN ('GTQ', 'USD')),
     activa INTEGER NOT NULL DEFAULT 1 CHECK (activa IN (0, 1)),
     creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (banco, nombre, numero)
@@ -273,6 +275,18 @@ def _upgrade_7(connection):
     )
 
 
+def _upgrade_8(connection):
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(cuentas_bancarias)")
+    }
+    if "moneda" not in columns:
+        connection.execute(
+            "ALTER TABLE cuentas_bancarias ADD COLUMN moneda "
+            "TEXT NOT NULL DEFAULT 'GTQ' "
+            "CHECK (moneda IN ('GTQ', 'USD'))"
+        )
+
+
 MIGRATIONS = (
     Migration(1, "esquema_inicial", _upgrade_1),
     Migration(2, "numero_deposito", _upgrade_2),
@@ -281,6 +295,7 @@ MIGRATIONS = (
     Migration(5, "formato_conciliacion_gt_continental", _upgrade_5),
     Migration(6, "formato_conciliacion_banrural", _upgrade_6),
     Migration(7, "formato_conciliacion_bac", _upgrade_7),
+    Migration(8, "moneda_cuenta", _upgrade_8),
 )
 LATEST_VERSION = MIGRATIONS[-1].version
 
