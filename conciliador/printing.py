@@ -12,7 +12,9 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
+from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     PageBreak,
@@ -27,6 +29,36 @@ from .domain import convertir_monto
 from .errors import ErrorOperacion
 
 DIRECTORIO_EXPORTACIONES = Path(".")
+
+# Se reemplazan también los nombres base que algunos Flowables seleccionan para
+# fragmentos vacíos; así ningún recurso Helvetica queda sin incrustar.
+FUENTE_REGULAR = "Helvetica"
+FUENTE_NEGRITA = "Helvetica-Bold"
+
+
+def _registrar_fuentes_pdf():
+    """Registra fuentes TrueType que ReportLab incrusta dentro de cada PDF."""
+    directorio_fuentes = Path(__import__("reportlab").__file__).parent / "fonts"
+    pdfmetrics.registerFont(
+        TTFont(FUENTE_REGULAR, str(directorio_fuentes / "Vera.ttf"))
+    )
+    pdfmetrics.registerFont(
+        TTFont(FUENTE_NEGRITA, str(directorio_fuentes / "VeraBd.ttf"))
+    )
+    pdfmetrics.registerFontFamily(
+        FUENTE_REGULAR,
+        normal=FUENTE_REGULAR,
+        bold=FUENTE_NEGRITA,
+    )
+
+
+_registrar_fuentes_pdf()
+
+
+def _crear_canvas_pdf(*args, **kwargs):
+    kwargs.setdefault("initialFontName", FUENTE_REGULAR)
+    return canvas.Canvas(*args, **kwargs)
+
 
 FORMATO_IMPRESION_DEFAULT = {
     "ancho": 22.0,
@@ -286,7 +318,7 @@ def _tabla_pdf(datos, anchos, filas_vacias=False):
     tabla = Table(datos, colWidths=anchos, repeatRows=1, hAlign="LEFT")
     instrucciones = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DCE6F1")),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA),
         ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#808080")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
@@ -311,10 +343,10 @@ def _pie_pagina(lienzo, documento, incluir_firmas=False):
         x = 1.5 * cm
         for etiqueta in ("Elaborado por", "Revisado por", "Autorizado por"):
             lienzo.line(x, 1.65 * cm, x + ancho_firma, 1.65 * cm)
-            lienzo.setFont("Helvetica", 7.5)
+            lienzo.setFont(FUENTE_REGULAR, 7.5)
             lienzo.drawCentredString(x + ancho_firma / 2, 1.3 * cm, etiqueta)
             x += ancho_firma + separacion
-    lienzo.setFont("Helvetica", 7.5)
+    lienzo.setFont(FUENTE_REGULAR, 7.5)
     lienzo.drawString(1.5 * cm, 0.65 * cm, "Conciliación bancaria")
     lienzo.drawRightString(
         LETTER[0] - 1.5 * cm,
@@ -353,7 +385,7 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
     estilo_titulo = ParagraphStyle(
         "TituloConciliacion",
         parent=estilos["Title"],
-        fontName="Helvetica-Bold",
+        fontName=FUENTE_NEGRITA,
         fontSize=17,
         leading=20,
         alignment=TA_CENTER,
@@ -362,6 +394,7 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
     estilo_centrado = ParagraphStyle(
         "CentradoConciliacion",
         parent=estilos["Normal"],
+        fontName=FUENTE_REGULAR,
         alignment=TA_CENTER,
         fontSize=9,
         leading=11,
@@ -369,6 +402,7 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
     estilo_celda = ParagraphStyle(
         "CeldaConciliacion",
         parent=estilos["BodyText"],
+        fontName=FUENTE_REGULAR,
         fontSize=7.5,
         leading=9,
     )
@@ -380,6 +414,7 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
     estilo_seccion = ParagraphStyle(
         "SeccionConciliacion",
         parent=estilos["Heading2"],
+        fontName=FUENTE_NEGRITA,
         fontSize=11,
         leading=13,
         spaceBefore=5,
@@ -408,7 +443,7 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
     ]
     tabla_cuenta = Table(datos_cuenta, colWidths=(3.6 * cm, 11.8 * cm), hAlign="CENTER")
     tabla_cuenta.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (0, -1), FUENTE_NEGRITA),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
         ("TOPPADDING", (0, 0), (-1, -1), 2),
@@ -442,8 +477,8 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
     tabla_resumen.setStyle(TableStyle([
         ("LINEABOVE", (0, 7), (-1, 7), 0.8, colors.HexColor("#404040")),
         ("LINEABOVE", (0, 9), (-1, 9), 0.8, colors.HexColor("#404040")),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME", (0, 7), (-1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA),
+        ("FONTNAME", (0, 7), (-1, -1), FUENTE_NEGRITA),
         ("BACKGROUND", (0, 8), (-1, 8), colors.HexColor("#EDF3F8")),
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -517,7 +552,7 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
     )
     tabla_cheques_resumen.setStyle(TableStyle([
         ("SPAN", (0, -1), (2, -1)),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, -1), (-1, -1), FUENTE_NEGRITA),
         ("LINEABOVE", (0, -1), (-1, -1), 0.8, colors.HexColor("#404040")),
         ("ALIGN", (0, -1), (-1, -1), "RIGHT"),
     ]))
@@ -593,6 +628,7 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
         elementos,
         onFirstPage=_pie_resumen,
         onLaterPages=_pie_detalle,
+        canvasmaker=_crear_canvas_pdf,
     )
     abrir_pdf(nombre_pdf)
     return nombre_pdf
@@ -607,10 +643,12 @@ def imprimir_cheque_pdf(
     nombre_pdf = resolver_archivo_salida(archivo_salida or f"cheque_{num}.pdf")
     sistema = platform.system()
     if sistema == "Windows":
-        pdf = canvas.Canvas(str(nombre_pdf), pagesize=LETTER)
+        pdf = _crear_canvas_pdf(str(nombre_pdf), pagesize=LETTER)
         pdf.translate(0, LETTER[1] - alto_cheque)
     else:
-        pdf = canvas.Canvas(str(nombre_pdf), pagesize=(ancho_cheque, alto_cheque))
+        pdf = _crear_canvas_pdf(
+            str(nombre_pdf), pagesize=(ancho_cheque, alto_cheque)
+        )
     monto_formateado = formatear_monto_impresion(monto)
     entero, centavos = formatear_monto(monto).split(".")
     try:
@@ -619,35 +657,36 @@ def imprimir_cheque_pdf(
         raise ErrorOperacion("El monto del cheque no es válido.") from exc
     monto_en_letras = num2words(monto_entero, lang="es").upper()
     texto_oficial = f"{monto_en_letras} QUETZALES CON {centavos}/100"
+    pdf.setFont(FUENTE_REGULAR, 10)
     pdf.drawString(
         formato["fecha_x"] * cm,
         formato["fecha_y"] * cm,
         f"Guatemala {formatear_fecha_cheque(fecha)}",
     )
     pdf.drawString(formato["nombre_x"] * cm, formato["nombre_y"] * cm, nombre)
-    pdf.setFont("Helvetica-Bold", 12)
+    pdf.setFont(FUENTE_NEGRITA, 12)
     pdf.drawString(formato["monto_x"] * cm, formato["monto_y"] * cm, monto_formateado)
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont(FUENTE_REGULAR, 10)
     pdf.drawString(
         formato["no_negociable_x"] * cm,
         formato["no_negociable_y"] * cm,
         "NO NEGOCIABLE",
     )
     ancho = max(1 * cm, ancho_cheque - formato["monto_letras_x"] * cm - 1 * cm)
-    tamano = min(10, ancho * 10 / stringWidth(texto_oficial, "Helvetica", 10))
-    pdf.setFont("Helvetica", max(7, tamano))
+    tamano = min(10, ancho * 10 / stringWidth(texto_oficial, FUENTE_REGULAR, 10))
+    pdf.setFont(FUENTE_REGULAR, max(7, tamano))
     pdf.drawString(
         formato["monto_letras_x"] * cm,
         formato["monto_letras_y"] * cm,
         texto_oficial,
     )
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont(FUENTE_REGULAR, 10)
     if descripcion:
         texto_descripcion = pdf.beginText(
             formato["descripcion_x"] * cm,
             formato["descripcion_y"] * cm,
         )
-        texto_descripcion.setFont("Helvetica", 10)
+        texto_descripcion.setFont(FUENTE_REGULAR, 10)
         texto_descripcion.setLeading(12)
         for linea in str(descripcion).splitlines() or [""]:
             texto_descripcion.textLine(linea)

@@ -4,7 +4,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
 hiddenimports = collect_submodules("num2words")
-datas = collect_data_files("num2words")
+datas = collect_data_files("num2words") + collect_data_files(
+    "reportlab", includes=["fonts/Vera*.ttf"]
+)
 
 
 a = Analysis(

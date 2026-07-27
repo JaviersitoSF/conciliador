@@ -361,7 +361,9 @@ def test_imprimir_pdf_cubre_linux_macos_windows_y_falla_de_apertura():
             patch("conciliador.printing.os.startfile", create=True) as startfile:
         main.imprimir_cheque_pdf("3", "2026-06-03", "A", "10")
     crear_pdf.assert_called_once_with(
-        "cheque_3.pdf", pagesize=printing.LETTER
+        "cheque_3.pdf",
+        pagesize=printing.LETTER,
+        initialFontName=printing.FUENTE_REGULAR,
     )
     assert pdf_windows.traslados == [(0, printing.LETTER[1] - 14 * cm)]
     startfile.assert_called_once_with("cheque_3.pdf", "print")

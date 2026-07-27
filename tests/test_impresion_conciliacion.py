@@ -107,6 +107,21 @@ def test_pdf_sin_saldo_bancario_degrada_a_no_disponible(tmp_path):
     assert destino.read_bytes().startswith(b"%PDF")
 
 
+def test_pdf_incrusta_fuentes_truetype_con_metricas(tmp_path):
+    destino = tmp_path / "fuentes-incrustadas.pdf"
+
+    with patch("conciliador.printing.abrir_pdf"):
+        printing.exportar_conciliacion_pdf(_resultado_base(), destino)
+
+    contenido = destino.read_bytes()
+    assert b"/FontDescriptor" in contenido
+    assert b"/FontFile2" in contenido
+    assert b"/Widths" in contenido
+    assert b"/FirstChar" in contenido
+    assert b"/LastChar" in contenido
+    assert b"/ToUnicode" in contenido
+
+
 def test_detalle_extenso_pagina_sin_cambiar_orientacion(tmp_path):
     resultado = _resultado_base()
     resultado["cheques_transito"] = [
