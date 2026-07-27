@@ -3,7 +3,7 @@ from decimal import Decimal
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -366,11 +366,25 @@ def test_imprimir_pdf_cubre_linux_macos_windows_y_falla_de_apertura():
     assert pdf_windows.traslados == [(0, printing.LETTER[1] - 14 * cm)]
     startfile.assert_called_once_with("cheque_3.pdf", "print")
 
+    with patch("conciliador.printing.canvas.Canvas", return_value=PdfFalso()), \
+            patch("conciliador.printing.platform.system", return_value="Windows"), \
+            patch(
+                "conciliador.printing.os.startfile",
+                create=True,
+                side_effect=[OSError("sin asociación para imprimir"), None],
+            ) as startfile:
+        resultado = main.imprimir_cheque_pdf("4", "2026-06-03", "A", "10")
+    assert resultado is False
+    assert startfile.call_args_list == [
+        call("cheque_4.pdf", "print"),
+        call(str(Path("cheque_4.pdf").resolve())),
+    ]
+
     salida = StringIO()
     with patch("conciliador.printing.canvas.Canvas", return_value=PdfFalso()), \
             patch("conciliador.printing.platform.system", return_value="Windows"), \
             patch("conciliador.printing.os.startfile", None, create=True), \
             redirect_stdout(salida):
-        resultado = main.imprimir_cheque_pdf("4", "2026-06-03", "A", "10")
+        resultado = main.imprimir_cheque_pdf("5", "2026-06-03", "A", "10")
     assert "Abre el PDF manual" in salida.getvalue()
     assert resultado is False

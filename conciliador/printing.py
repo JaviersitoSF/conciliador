@@ -654,12 +654,17 @@ def imprimir_cheque_pdf(
         pdf.drawText(texto_descripcion)
     pdf.save()
     print(f"🖨️  PDF generado: {nombre_pdf}")
+    impresion_enviada = True
     try:
         if sistema == "Windows":
             startfile = getattr(os, "startfile", None)
             if not callable(startfile):
                 raise AttributeError("os.startfile no esta disponible en este entorno")
-            startfile(str(nombre_pdf), "print")
+            try:
+                startfile(str(nombre_pdf), "print")
+            except Exception:
+                abrir_pdf(nombre_pdf)
+                impresion_enviada = False
         elif sistema == "Darwin":
             abrir_pdf_silenciosamente([
                 "lp", "-o",
@@ -671,7 +676,7 @@ def imprimir_cheque_pdf(
     except Exception as exc:
         print(f"⚠️ Abre el PDF manual. Error: {exc}")
         return False
-    return True
+    return impresion_enviada
 
 
 def probar_formato_impresion(valores, archivo_salida="prueba_formato_cheque.pdf"):
