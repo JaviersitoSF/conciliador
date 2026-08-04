@@ -380,7 +380,7 @@ class ConciliadorApp(tk.Tk):
         panel = ttk.Frame(self.tab_conciliacion)
         panel.pack(fill="both", expand=True)
         panel.columnconfigure((0, 1), weight=1, uniform="conc")
-        panel.rowconfigure((0, 1), weight=1, uniform="conc")
+        panel.rowconfigure((0, 1, 2), weight=1, uniform="conc")
 
         cobrados = ttk.LabelFrame(panel, text="Cheques cobrados", padding=10)
         cobrados.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
@@ -412,6 +412,19 @@ class ConciliadorApp(tk.Tk):
         notas.columnconfigure(0, weight=1)
         self.tabla_notas_debito_no_ingresadas = self._tabla(
             notas, ("Numero", "Fecha", "Descripcion", "Monto", "Diferencia")
+        )
+
+        cheques_sin_registro = ttk.LabelFrame(
+            panel, text="Cheques cobrados no registrados", padding=10
+        )
+        cheques_sin_registro.grid(
+            row=2, column=0, columnspan=2, sticky="nsew", pady=(12, 0)
+        )
+        cheques_sin_registro.rowconfigure(0, weight=1)
+        cheques_sin_registro.columnconfigure(0, weight=1)
+        self.tabla_cheques_banco_sin_registro = self._tabla(
+            cheques_sin_registro,
+            ("Numero", "Fecha", "Descripcion", "Monto", "Diferencia"),
         )
 
     @staticmethod
@@ -986,6 +999,7 @@ class ConciliadorApp(tk.Tk):
             self.tabla_cheques_transito,
             self.tabla_depositos_no_ingresados,
             self.tabla_notas_debito_no_ingresadas,
+            self.tabla_cheques_banco_sin_registro,
         )
         for tabla in tablas:
             self._limpiar_tabla(tabla)
@@ -1011,6 +1025,10 @@ class ConciliadorApp(tk.Tk):
         for clave, tabla in (
             ("diferencias_depositos", self.tabla_depositos_no_ingresados),
             ("diferencias_notas_debito", self.tabla_notas_debito_no_ingresadas),
+            (
+                "cheques_banco_sin_registro",
+                self.tabla_cheques_banco_sin_registro,
+            ),
         ):
             for fila in resultado[clave]:
                 tabla.insert(
@@ -1025,6 +1043,7 @@ class ConciliadorApp(tk.Tk):
             ("cheques_transito", "En tránsito"),
             ("diferencias_depositos", "Diferencias de depósitos"),
             ("diferencias_notas_debito", "Diferencias de notas de débito"),
+            ("cheques_banco_sin_registro", "Cheques sin registro"),
         )
         self.resumen_conciliacion.configure(
             text="   |   ".join(
@@ -1039,6 +1058,7 @@ class ConciliadorApp(tk.Tk):
             "No hay cheques en tránsito",
             "No hay diferencias de depósitos",
             "No hay diferencias de notas de débito",
+            "No hay cheques cobrados sin registro",
         )
         for tabla, mensaje in zip(tablas, mensajes_vacios):
             self._mostrar_estado_vacio(tabla, mensaje)
@@ -1343,6 +1363,7 @@ class ConciliadorApp(tk.Tk):
             self.tabla_cheques_transito,
             self.tabla_depositos_no_ingresados,
             self.tabla_notas_debito_no_ingresadas,
+            self.tabla_cheques_banco_sin_registro,
         ):
             self._limpiar_tabla(tabla)
             self._mostrar_estado_vacio(tabla, "Seleccione un estado de cuenta")

@@ -812,6 +812,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             cheque.update(detalles_cheques.get(cheque["num"], {}))
 
         no_registrados = []
+        cheques_banco_sin_registro = []
         lista_nuestros_nums = set(df_nuestro["Num_norm"].dropna().tolist())
         for _, fila_banco in df_banco.iterrows():
             num_bco = fila_banco["Num_norm"]
@@ -823,6 +824,16 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                     "pero NO está en nuestro sistema."
                 )
                 no_registrados.append({"num": num_bco, "monto": monto_banco, "mensaje": mensaje})
+                cheques_banco_sin_registro.append(
+                    {
+                        "num": num_bco,
+                        "fecha": _fecha_bancaria(fila_banco.get("fecha")) or "N/D",
+                        "descripcion": _texto_celda(fila_banco.get("descripcion")),
+                        "monto": monto_banco,
+                        "diferencia": "Cobrado sin registro local",
+                        "mensaje": mensaje,
+                    }
+                )
 
         for _, fila_banco in filas_numero_invalido.iterrows():
             valor_original = fila_banco["Num_original"]
@@ -998,6 +1009,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             "no_registrados": no_registrados,
             "cheques_cobrados": cheques_cobrados,
             "cheques_transito": cheques_transito,
+            "cheques_banco_sin_registro": cheques_banco_sin_registro,
             "depositos_no_ingresados": depositos_no_ingresados,
             "notas_debito_no_ingresadas": notas_debito_no_ingresadas,
             "depositos_banco_sin_registro": depositos_banco_sin_registro,
@@ -1008,6 +1020,9 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             "resumen": {
                 "cheques_cobrados": resumen(cheques_cobrados),
                 "cheques_transito": resumen(cheques_transito),
+                "cheques_banco_sin_registro": resumen(
+                    cheques_banco_sin_registro
+                ),
                 "depositos_no_ingresados": resumen(depositos_no_ingresados),
                 "depositos_banco_sin_registro": resumen(depositos_banco_sin_registro),
                 "notas_credito_banco": resumen(notas_credito_banco),

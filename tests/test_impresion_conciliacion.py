@@ -18,6 +18,13 @@ def _resultado_base():
     notas_credito = [{"monto": Decimal("5.02")}]
     notas_debito_transito = [{"monto": Decimal("2.03")}]
     debitos_banco = [{"monto": Decimal("7.04")}]
+    cheques_banco_sin_registro = [{
+        "num": "202",
+        "fecha": "2026-06-08",
+        "descripcion": "Cheque bancario",
+        "monto": Decimal("9.05"),
+        "diferencia": "Cobrado sin registro local",
+    }]
     return {
         "cuenta": {
             "id": 1,
@@ -33,6 +40,7 @@ def _resultado_base():
             "saldo_final": Decimal("1000.37"),
         },
         "cheques_transito": cheques,
+        "cheques_banco_sin_registro": cheques_banco_sin_registro,
         "depositos_no_ingresados": depositos_transito,
         "depositos_banco_sin_registro": creditos_banco,
         "notas_credito_banco": notas_credito,
@@ -61,9 +69,10 @@ def test_resumen_cuadra_saldo_final_con_ajustes_disjuntos_y_centavos():
     resumen = printing.calcular_resumen_conciliacion(_resultado_base())
 
     assert resumen == {
-        "saldo_libros": Decimal("870.24"),
+        "saldo_libros": Decimal("879.29"),
         "saldo_libros_calculado": True,
         "cheques_transito": Decimal("100.11"),
+        "cheques_banco_sin_registro": Decimal("9.05"),
         "notas_debito_transito": Decimal("2.03"),
         "creditos_banco": Decimal("50.07"),
         "notas_credito_banco": Decimal("5.02"),

@@ -204,6 +204,9 @@ def calcular_resumen_conciliacion(resultado):
     en tránsito y débitos bancarios aún no registrados se restan.
     """
     cheques_transito = resultado.get("cheques_transito", []) or []
+    cheques_banco_sin_registro = (
+        resultado.get("cheques_banco_sin_registro", []) or []
+    )
     depositos_transito = _filas_compatibles(
         resultado,
         "depositos_no_ingresados",
@@ -234,6 +237,9 @@ def calcular_resumen_conciliacion(resultado):
         "cheques_transito": _total_movimientos(
             cheques_transito, "monto_nuestro"
         ),
+        "cheques_banco_sin_registro": _total_movimientos(
+            cheques_banco_sin_registro
+        ),
         "notas_debito_transito": _total_movimientos(notas_debito_transito),
         "creditos_banco": _total_movimientos(creditos_banco),
         "notas_credito_banco": _total_movimientos(notas_credito_banco),
@@ -251,6 +257,7 @@ def calcular_resumen_conciliacion(resultado):
         saldo_libros = (
             saldo_banco
             - ajustes["cheques_transito"]
+            + ajustes["cheques_banco_sin_registro"]
             - ajustes["notas_debito_transito"]
             - ajustes["creditos_banco"]
             - ajustes["notas_credito_banco"]
@@ -264,6 +271,7 @@ def calcular_resumen_conciliacion(resultado):
         saldo_conciliado = (
             saldo_libros
             + ajustes["cheques_transito"]
+            - ajustes["cheques_banco_sin_registro"]
             + ajustes["notas_debito_transito"]
             + ajustes["creditos_banco"]
             + ajustes["notas_credito_banco"]
@@ -456,6 +464,10 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
     filas_resumen = (
         (etiqueta_libros, resumen["saldo_libros"]),
         ("(+) Cheques en circulación", resumen["cheques_transito"]),
+        (
+            "(-) Cheques cobrados no registrados",
+            resumen["cheques_banco_sin_registro"],
+        ),
         ("(+) Notas de débito en tránsito", resumen["notas_debito_transito"]),
         ("(+) Créditos bancarios no registrados", resumen["creditos_banco"]),
         ("(+) Notas de crédito operadas por el banco", resumen["notas_credito_banco"]),
@@ -575,6 +587,18 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
     ))
 
     secciones = (
+        (
+            "Cheques cobrados no registrados",
+            ("Número", "Fecha", "Descripción", "Monto", "Diferencia"),
+            resultado.get("cheques_banco_sin_registro", []),
+            lambda fila: (
+                fila.get("num", "S/N"), fila.get("fecha", "N/D"),
+                fila.get("descripcion", ""),
+                f"{simbolo} {formatear_monto_impresion(fila.get('monto') or 0)}",
+                fila.get("diferencia", ""),
+            ),
+            (2.2 * cm, 2.6 * cm, 5.5 * cm, 3.0 * cm, 5.0 * cm),
+        ),
         (
             "Cheques en tránsito",
             ("Número", "Monto", "Detalle"),

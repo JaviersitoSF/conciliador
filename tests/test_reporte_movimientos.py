@@ -210,6 +210,26 @@ class SistemaBancarioTests(unittest.TestCase):
         self.assertEqual(estados["3"], "TRANSITO")
         self.assertEqual(estados["4"], "ALERTA")
         self.assertEqual(resultado["no_registrados"][0]["num"], "99")
+        self.assertEqual(
+            resultado["cheques_banco_sin_registro"],
+            [
+                {
+                    "num": "99",
+                    "fecha": "2026-06-03",
+                    "descripcion": "COMPENSACIÓN",
+                    "monto": Decimal("12.00"),
+                    "diferencia": "Cobrado sin registro local",
+                    "mensaje": (
+                        "❓ Cheque 99 por Q 12.00 cobrado por el banco, "
+                        "pero NO está en nuestro sistema."
+                    ),
+                }
+            ],
+        )
+        self.assertEqual(
+            resultado["resumen"]["cheques_banco_sin_registro"],
+            {"cantidad": 1, "total": Decimal("12.00")},
+        )
 
     def test_cuentas_separan_numeros_movimientos_y_reportes(self):
         cuenta_a = main.crear_cuenta_bancaria("BANCO A", "Monetaria", "001")
