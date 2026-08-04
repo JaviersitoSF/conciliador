@@ -308,6 +308,19 @@ def test_conciliacion_bi_coteja_notas_credito_con_depositos_por_numero_y_monto()
     assert resultado["depositos_no_ingresados"] == []
     assert resultado["depositos_banco_sin_registro"] == []
     assert [fila["num"] for fila in resultado["notas_credito_banco"]] == ["999999"]
+    assert resultado["diferencias_depositos"] == [
+        {
+            "num": "999999",
+            "fecha": "2026-06-04",
+            "descripcion": "CRÉDITO SIN DEPÓSITO",
+            "monto": Decimal("25.00"),
+            "diferencia": "Nota de crédito no registrada localmente",
+        }
+    ]
+    assert resultado["resumen"]["diferencias_depositos"] == {
+        "cantidad": 1,
+        "total": Decimal("25.00"),
+    }
 
 
 def test_abrir_pdf_propaga_detalle_del_comando():

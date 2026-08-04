@@ -919,7 +919,13 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             fila["diferencia"] = "Pendiente en banco"
         for fila in depositos_banco_sin_registro:
             fila["diferencia"] = "No registrado localmente"
-        diferencias_depositos = depositos_no_ingresados + depositos_banco_sin_registro
+        for fila in notas_credito_banco:
+            fila["diferencia"] = "Nota de crédito no registrada localmente"
+        diferencias_depositos = (
+            depositos_no_ingresados
+            + depositos_banco_sin_registro
+            + notas_credito_banco
+        )
 
         for fila in notas_locales_sin_banco:
             fila["diferencia"] = "No aparece en el banco"
