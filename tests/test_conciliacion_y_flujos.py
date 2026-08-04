@@ -94,6 +94,16 @@ def test_conciliacion_distingue_anulado_no_cobrado_y_monto_invalido():
     estados = {fila["num"]: fila["resultado"] for fila in resultado["cheques"]}
 
     assert estados == {"1": "ANULADO", "2": "INVALIDO"}
+    assert resultado["filas_invalidas"] == [
+        {
+            "num": "2",
+            "fecha": "2026-06-01",
+            "descripcion": "[CQ] COMPENSACIÓN",
+            "monto": None,
+            "diferencia": "Monto inválido",
+            "fila": 7,
+        }
+    ]
 
 
 def test_conciliacion_no_suma_parcialmente_duplicados_con_monto_invalido():
@@ -133,6 +143,9 @@ def test_conciliacion_no_descarta_filas_con_numero_invalido():
 
     assert [fila["num"] for fila in invalidos] == ["ABC", "N/D"]
     assert all("inválido" in fila["mensaje"].lower() for fila in invalidos)
+    assert [fila["num"] for fila in resultado["filas_invalidas"]] == [
+        "ABC", "N/D"
+    ]
 
 
 def test_conciliacion_incluye_pendientes_anteriores_y_excluye_cheques_futuros():
@@ -221,6 +234,9 @@ def test_conciliacion_bi_funciona_sin_cheques_locales_ni_bancarios():
     assert resultado["cheques"] == []
     assert len(resultado["no_registrados"]) == 1
     assert resultado["no_registrados"][0]["resultado"] == "CARGO_BANCO"
+    assert resultado["filas_invalidas"][0]["diferencia"] == (
+        "Tipo de movimiento no reconocido: CA"
+    )
 
 
 def test_conciliacion_presenta_las_cuatro_categorias_contables():

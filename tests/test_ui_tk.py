@@ -100,6 +100,62 @@ def test_fin_de_mes_usa_el_ultimo_dia_del_periodo():
     assert ui_tk.ConciliadorApp._fin_de_mes("2026-06") == "2026-06-30"
 
 
+def test_conciliacion_muestra_cheques_sin_registro_y_filas_invalidas():
+    tablas = [Mock() for _ in range(6)]
+    resumen = {
+        clave: {"cantidad": 0, "total": 0}
+        for clave in (
+            "cheques_cobrados", "cheques_transito", "diferencias_depositos",
+            "diferencias_notas_debito", "cheques_banco_sin_registro",
+        )
+    }
+    resumen["cheques_banco_sin_registro"] = {"cantidad": 1, "total": 25}
+    resumen["filas_invalidas"] = {"cantidad": 1, "total": 0}
+    resultado = {
+        "cheques_cobrados": [],
+        "cheques_transito": [],
+        "diferencias_depositos": [],
+        "diferencias_notas_debito": [],
+        "cheques_banco_sin_registro": [{
+            "num": "99", "fecha": "2026-06-03", "descripcion": "CHEQUE",
+            "monto": 25, "diferencia": "Cobrado sin registro local",
+        }],
+        "filas_invalidas": [{
+            "num": "Fila 8", "fecha": "fecha mala", "descripcion": "ERROR",
+            "monto": None, "diferencia": "Fecha inválida",
+        }],
+        "resumen": resumen,
+        "estado_cuenta": {"moneda": "GTQ"},
+    }
+    app = SimpleNamespace(
+        tabla_cheques_cobrados=tablas[0],
+        tabla_cheques_transito=tablas[1],
+        tabla_depositos_no_ingresados=tablas[2],
+        tabla_notas_debito_no_ingresadas=tablas[3],
+        tabla_cheques_banco_sin_registro=tablas[4],
+        tabla_filas_invalidas=tablas[5],
+        conciliacion_mes=VariableFalsa("2026-06"),
+        cuenta_id_actual=Mock(return_value=4),
+        _fin_de_mes=Mock(return_value="2026-06-30"),
+        _limpiar_tabla=Mock(),
+        _mostrar_estado_vacio=Mock(),
+        resumen_conciliacion=Mock(),
+        boton_imprimir_conciliacion=Mock(),
+    )
+
+    with patch.object(ui_tk.service, "conciliar", return_value=resultado):
+        ui_tk.ConciliadorApp._conciliar_archivo(app, "estado.csv")
+
+    tablas[4].insert.assert_called_once_with(
+        "", ui_tk.tk.END,
+        values=("99", "2026-06-03", "CHEQUE", "25.00", "Cobrado sin registro local"),
+    )
+    tablas[5].insert.assert_called_once_with(
+        "", ui_tk.tk.END,
+        values=("Fila 8", "fecha mala", "ERROR", "N/D", "Fecha inválida"),
+    )
+
+
 def test_registrar_deposito_incluye_numero():
     entradas = [
         EntradaFalsa("DEP-18"),

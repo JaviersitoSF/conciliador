@@ -588,6 +588,22 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
 
     secciones = (
         (
+            "Alertas de filas inválidas",
+            ("Número", "Fecha", "Descripción", "Monto", "Alerta"),
+            resultado.get("filas_invalidas", []),
+            lambda fila: (
+                fila.get("num", "S/N"), fila.get("fecha", "N/D"),
+                fila.get("descripcion", ""),
+                (
+                    f"{simbolo} {formatear_monto_impresion(fila['monto'])}"
+                    if fila.get("monto") is not None
+                    else "N/D"
+                ),
+                fila.get("diferencia", ""),
+            ),
+            (2.2 * cm, 2.6 * cm, 5.5 * cm, 3.0 * cm, 5.0 * cm),
+        ),
+        (
             "Cheques cobrados no registrados",
             ("Número", "Fecha", "Descripción", "Monto", "Diferencia"),
             resultado.get("cheques_banco_sin_registro", []),

@@ -418,13 +418,26 @@ class ConciliadorApp(tk.Tk):
             panel, text="Cheques cobrados no registrados", padding=10
         )
         cheques_sin_registro.grid(
-            row=2, column=0, columnspan=2, sticky="nsew", pady=(12, 0)
+            row=2, column=0, sticky="nsew", padx=(0, 6), pady=(12, 0)
         )
         cheques_sin_registro.rowconfigure(0, weight=1)
         cheques_sin_registro.columnconfigure(0, weight=1)
         self.tabla_cheques_banco_sin_registro = self._tabla(
             cheques_sin_registro,
             ("Numero", "Fecha", "Descripcion", "Monto", "Diferencia"),
+        )
+
+        filas_invalidas = ttk.LabelFrame(
+            panel, text="Alertas de filas inválidas", padding=10
+        )
+        filas_invalidas.grid(
+            row=2, column=1, sticky="nsew", padx=(6, 0), pady=(12, 0)
+        )
+        filas_invalidas.rowconfigure(0, weight=1)
+        filas_invalidas.columnconfigure(0, weight=1)
+        self.tabla_filas_invalidas = self._tabla(
+            filas_invalidas,
+            ("Numero", "Fecha", "Descripcion", "Monto", "Alerta"),
         )
 
     @staticmethod
@@ -1000,6 +1013,7 @@ class ConciliadorApp(tk.Tk):
             self.tabla_depositos_no_ingresados,
             self.tabla_notas_debito_no_ingresadas,
             self.tabla_cheques_banco_sin_registro,
+            self.tabla_filas_invalidas,
         )
         for tabla in tablas:
             self._limpiar_tabla(tabla)
@@ -1029,11 +1043,17 @@ class ConciliadorApp(tk.Tk):
                 "cheques_banco_sin_registro",
                 self.tabla_cheques_banco_sin_registro,
             ),
+            ("filas_invalidas", self.tabla_filas_invalidas),
         ):
             for fila in resultado[clave]:
+                monto = (
+                    core.formatear_monto(fila["monto"])
+                    if fila.get("monto") is not None
+                    else "N/D"
+                )
                 tabla.insert(
                     "", tk.END,
-                    values=(fila["num"], fila["fecha"], fila["descripcion"], core.formatear_monto(fila["monto"]), fila["diferencia"]),
+                    values=(fila["num"], fila["fecha"], fila["descripcion"], monto, fila["diferencia"]),
                 )
 
         resumen = resultado["resumen"]
@@ -1046,10 +1066,10 @@ class ConciliadorApp(tk.Tk):
             ("cheques_banco_sin_registro", "Cheques sin registro"),
         )
         self.resumen_conciliacion.configure(
-            text="   |   ".join(
+            text="   |   ".join([
                 f"{titulo}: {resumen[clave]['cantidad']} · {simbolo} {core.formatear_monto(resumen[clave]['total'])}"
                 for clave, titulo in etiquetas
-            )
+            ] + [f"Filas inválidas: {resumen['filas_invalidas']['cantidad']}"])
         )
         self.resultado_conciliacion = resultado
         self.boton_imprimir_conciliacion.configure(state="normal")
@@ -1059,6 +1079,7 @@ class ConciliadorApp(tk.Tk):
             "No hay diferencias de depósitos",
             "No hay diferencias de notas de débito",
             "No hay cheques cobrados sin registro",
+            "No hay filas inválidas",
         )
         for tabla, mensaje in zip(tablas, mensajes_vacios):
             self._mostrar_estado_vacio(tabla, mensaje)
@@ -1364,6 +1385,7 @@ class ConciliadorApp(tk.Tk):
             self.tabla_depositos_no_ingresados,
             self.tabla_notas_debito_no_ingresadas,
             self.tabla_cheques_banco_sin_registro,
+            self.tabla_filas_invalidas,
         ):
             self._limpiar_tabla(tabla)
             self._mostrar_estado_vacio(tabla, "Seleccione un estado de cuenta")

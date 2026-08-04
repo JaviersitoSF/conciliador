@@ -14,6 +14,7 @@ def crear_estado_banrural(ruta):
         "04/06/2026,948,PAGO CHEQUE,1912759098,1,1234,2550.0,0,100,100",
         "05/06/2026,669,DEPOSITO COMPLETO,49518610,2,EFECTIVO,0,361.0,461,461",
         "12/06/2026,9755,N/DEBITO TRANSFERENCIA,55086606,3,,7600.0,0,0,0",
+        "13/06/2026,9755,FILA INVALIDA,55086607,4,,malo,0,0,0",
         "Confidencial",
     ])
     Path(ruta).write_bytes(contenido.encode("latin-1"))
@@ -36,6 +37,10 @@ def test_lector_banrural_clasifica_movimientos_y_metadatos(tmp_path):
     assert estado["cheques"].iloc[0]["Monto"] == Decimal("2550.00")
     assert estado["depositos"][0]["Num_cheque"] == "49518610"
     assert estado["notas_debito"][0]["Num_cheque"] == "55086606"
+    assert estado["filas_invalidas"][0]["numero"] == "55086607"
+    assert estado["filas_invalidas"][0]["detalle"] == (
+        "Monto inválido o igual a cero"
+    )
 
 
 def test_cuenta_acepta_formato_banrural_y_numero_enmascarado(tmp_path, monkeypatch):

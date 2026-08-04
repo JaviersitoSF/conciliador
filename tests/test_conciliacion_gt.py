@@ -21,6 +21,8 @@ def test_lector_gt_clasifica_cheques_depositos_y_notas(monkeypatch):
             [1, "02/06/2026", 93808165, "PAGO DE CHEQUE", -4919.06, None, 100, "AGENCIA"],
             [2, "03/06/2026", 1234, "DEPOSITO EN EFECTIVO", None, 25, 125, "AGENCIA"],
             [3, "04/06/2026", 99, "NOTA DEBITO POR ISR", -0.28, None, 124.72, "AGENCIA"],
+            [4, "05/06/2026", 100, "FILA INVÁLIDA", "malo", None, 124.72, "AGENCIA"],
+            ["No Débitos:", None, 2, None, "Total Débitos:", 4919.34, None, None],
         ]
     )
     monkeypatch.setattr(analytics.pd, "read_excel", lambda *args, **kwargs: tabla)
@@ -36,6 +38,17 @@ def test_lector_gt_clasifica_cheques_depositos_y_notas(monkeypatch):
     assert estado["cheques"].iloc[0]["Monto"] == Decimal("4919.06")
     assert estado["depositos"][0]["Monto"] == Decimal("25.00")
     assert estado["notas_debito"][0]["Monto"] == Decimal("0.28")
+    assert estado["filas_invalidas"] == [
+        {
+            "fila": 8,
+            "fecha": "05/06/2026",
+            "tipo": "",
+            "numero": "100",
+            "descripcion": "FILA INVÁLIDA",
+            "monto": None,
+            "detalle": "Monto inválido o igual a cero",
+        }
+    ]
 
 
 def test_cuenta_acepta_formato_gt_continental():

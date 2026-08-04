@@ -34,6 +34,22 @@ def _texto_celda(valor):
     return str(valor).strip()
 
 
+def _agregar_fila_invalida(
+    filas_invalidas, fila, fecha, tipo, numero, descripcion, monto, detalle
+):
+    filas_invalidas.append(
+        {
+            "fila": fila,
+            "fecha": str(fecha or "").strip(),
+            "tipo": str(tipo or "").strip(),
+            "numero": str(numero or "").strip(),
+            "descripcion": str(descripcion or "").strip(),
+            "monto": monto,
+            "detalle": detalle,
+        }
+    )
+
+
 def _normalizar_numero_cuenta(valor):
     """Normaliza la presentación del número sin alterar su valor bancario."""
     digitos = re.sub(r"\D", "", str(valor or ""))
@@ -114,7 +130,10 @@ def _leer_csv_banco_industrial(archivo):
     notas_credito = []
     notas_debito = []
     otros_cargos = []
-    for fila in filas[indice_cabecera + 1:]:
+    filas_invalidas = []
+    for numero_fila, fila in enumerate(
+        filas[indice_cabecera + 1:], start=indice_cabecera + 2
+    ):
         if not fila or not any(str(valor).strip() for valor in fila):
             continue
         if len(fila) > len(cabecera):
@@ -124,20 +143,41 @@ def _leer_csv_banco_industrial(archivo):
         tipo = fila[columnas["tt"]].strip().upper()
         debe_original = fila[columnas["debe"]].strip()
         haber_original = fila[columnas["haber"]].strip()
+        fecha_original = fila[columnas["fecha"]].strip()
+        numero_original = fila[columnas["no. doc"]].strip()
+        descripcion_original = fila[columnas["descripción"]].strip()
         saldo_fila = convertir_monto(fila[columnas["saldo"]].strip())
         if saldo_fila is not None:
             saldo_final = saldo_fila
-        if not debe_original and not haber_original:
+        if _fecha_bancaria(fecha_original) is None:
+            _agregar_fila_invalida(
+                filas_invalidas, numero_fila, fecha_original, tipo,
+                numero_original, descripcion_original, None,
+                "Fecha inválida",
+            )
+            continue
+        if bool(debe_original) == bool(haber_original):
+            _agregar_fila_invalida(
+                filas_invalidas, numero_fila, fecha_original, tipo,
+                numero_original, descripcion_original, None,
+                "La fila debe tener un único monto en Debe o Haber",
+            )
             continue
         monto = convertir_monto(debe_original or haber_original)
-        if monto is None and tipo != "CQ":
-            continue
+        if monto is None:
+            _agregar_fila_invalida(
+                filas_invalidas, numero_fila, fecha_original, tipo,
+                numero_original, descripcion_original, None,
+                "Monto inválido",
+            )
+            if tipo != "CQ":
+                continue
         movimiento = {
-            "Num_cheque": fila[columnas["no. doc"]].strip(),
+            "Num_cheque": numero_original,
             "Monto": monto,
-            "fecha": fila[columnas["fecha"]].strip(),
+            "fecha": fecha_original,
             "tipo": tipo,
-            "descripcion": fila[columnas["descripción"]].strip(),
+            "descripcion": descripcion_original,
         }
         if tipo == "CQ":
             cheques.append(movimiento)
@@ -147,8 +187,14 @@ def _leer_csv_banco_industrial(archivo):
             notas_credito.append(movimiento)
         elif tipo == "ND":
             notas_debito.append(movimiento)
-        elif debe_original:
-            otros_cargos.append(movimiento)
+        else:
+            _agregar_fila_invalida(
+                filas_invalidas, numero_fila, fecha_original, tipo,
+                numero_original, descripcion_original, monto,
+                f"Tipo de movimiento no reconocido: {tipo or 'vacío'}",
+            )
+            if debe_original:
+                otros_cargos.append(movimiento)
 
     return {
         "cheques": pd.DataFrame(
@@ -159,6 +205,7 @@ def _leer_csv_banco_industrial(archivo):
         "depositos": depositos,
         "notas_credito": notas_credito,
         "notas_debito": notas_debito,
+        "filas_invalidas": filas_invalidas,
         "cuenta_numero": cuenta_numero,
         "cuenta_nombre": cuenta_nombre,
         "fecha_inicio": fecha_inicio,
@@ -216,12 +263,21 @@ def _leer_xls_gt_continental(archivo):
     cheques = []
     depositos = []
     notas_debito = []
-    for _, fila in tabla.iloc[indice_cabecera + 1:].iterrows():
+    filas_invalidas = []
+    for indice_fila, fila in tabla.iloc[indice_cabecera + 1:].iterrows():
+        numero_fila = int(indice_fila) + 1
+        etiqueta_fila = _texto_celda(fila.iloc[0]).casefold()
+        if etiqueta_fila in {
+            "no débitos:", "no. créditos:", "total de transacciones:"
+        }:
+            break
         fecha = _texto_celda(fila.iloc[columnas["fecha"]])
         referencia = _texto_celda(fila.iloc[columnas["referencia"]])
         descripcion = _texto_celda(fila.iloc[columnas["descripción"]])
-        debito = convertir_monto(fila.iloc[columnas["débito"]])
-        credito = convertir_monto(fila.iloc[columnas["crédito"]])
+        debito_original = _texto_celda(fila.iloc[columnas["débito"]])
+        credito_original = _texto_celda(fila.iloc[columnas["crédito"]])
+        debito = convertir_monto(debito_original)
+        credito = convertir_monto(credito_original)
         saldo_fila = (
             convertir_monto(fila.iloc[indice_saldo])
             if indice_saldo is not None
@@ -229,22 +285,55 @@ def _leer_xls_gt_continental(archivo):
         )
         if saldo_fila is not None:
             saldo_final = saldo_fila
-        if not fecha or (debito is None and credito is None):
+        if not any(
+            (fecha, referencia, descripcion, debito_original, credito_original)
+        ):
+            continue
+        if not fecha and not any(
+            (descripcion, debito_original, credito_original)
+        ):
+            # G&T agrega contadores al pie usando la columna Referencia.
+            continue
+        if _fecha_bancaria(fecha) is None:
+            _agregar_fila_invalida(
+                filas_invalidas, numero_fila, fecha, "", referencia,
+                descripcion, None, "Fecha inválida",
+            )
+            continue
+        tiene_debito = debito is not None and debito != 0
+        tiene_credito = credito is not None and credito != 0
+        if tiene_debito == tiene_credito:
+            if debito == 0 and credito == 0:
+                continue
+            monto = (
+                abs(debito or credito)
+                if debito is not None or credito is not None
+                else None
+            )
+            detalle = (
+                "La fila contiene débito y crédito"
+                if tiene_debito
+                else "Monto inválido o igual a cero"
+            )
+            _agregar_fila_invalida(
+                filas_invalidas, numero_fila, fecha, "", referencia,
+                descripcion, monto, detalle,
+            )
             continue
         descripcion_norm = descripcion.casefold()
         movimiento = {
             "Num_cheque": referencia,
-            "Monto": abs(debito if debito is not None else credito),
+            "Monto": abs(debito if tiene_debito else credito),
             "fecha": fecha,
             "descripcion": descripcion,
         }
-        if debito is not None and (
+        if tiene_debito and (
             "pago de cheque" in descripcion_norm
             or "cheque propio en consignacion" in descripcion_norm
         ):
             movimiento["tipo"] = "CQ"
             cheques.append(movimiento)
-        elif credito is not None:
+        elif tiene_credito:
             movimiento["tipo"] = "DP"
             depositos.append(movimiento)
         else:
@@ -260,6 +349,7 @@ def _leer_xls_gt_continental(archivo):
         "depositos": depositos,
         "notas_credito": [],
         "notas_debito": notas_debito,
+        "filas_invalidas": filas_invalidas,
         "cuenta_numero": cuenta_numero,
         "cuenta_nombre": cuenta_nombre,
         "fecha_inicio": fecha_inicio,
@@ -318,22 +408,55 @@ def _leer_csv_banrural(archivo):
         )
 
     cheques, depositos, notas_debito = [], [], []
-    for fila in filas[indice_cabecera + 1:]:
+    filas_invalidas = []
+    for numero_fila, fila in enumerate(
+        filas[indice_cabecera + 1:], start=indice_cabecera + 2
+    ):
         fila += [""] * (len(cabecera) - len(fila))
         fecha = fila[columnas["fecha"]].strip()
-        if not fecha or _fecha_bancaria(fecha) is None:
+        descripcion = fila[columnas["descripción"]].strip()
+        referencia = fila[columnas["referencia"]].strip()
+        cheque = fila[columnas["cheque propio / local / efectivo"]].strip()
+        debito_original = fila[columnas["débito (-)"]].strip()
+        credito_original = fila[columnas["crédito (+)"]].strip()
+        if not any(
+            (referencia, descripcion, cheque, debito_original, credito_original)
+        ):
+            continue
+        debito = convertir_monto(debito_original)
+        credito = convertir_monto(credito_original)
+        if _fecha_bancaria(fecha) is None:
+            _agregar_fila_invalida(
+                filas_invalidas, numero_fila, fecha, "", cheque or referencia,
+                descripcion, None, "Fecha inválida",
+            )
             continue
         indice_saldo = columnas.get("saldo contable")
         if indice_saldo is not None:
             saldo_fila = convertir_monto(fila[indice_saldo])
             if saldo_fila is not None:
                 saldo_final = saldo_fila
-        descripcion = fila[columnas["descripción"]].strip()
-        referencia = fila[columnas["referencia"]].strip()
-        cheque = fila[columnas["cheque propio / local / efectivo"]].strip()
-        debito = convertir_monto(fila[columnas["débito (-)"]])
-        credito = convertir_monto(fila[columnas["crédito (+)"]])
-        if debito is not None and debito != 0:
+        tiene_debito = debito is not None and debito != 0
+        tiene_credito = credito is not None and credito != 0
+        if tiene_debito == tiene_credito:
+            if debito == 0 and credito == 0:
+                continue
+            monto = (
+                abs(debito or credito)
+                if debito is not None or credito is not None
+                else None
+            )
+            detalle = (
+                "La fila contiene débito y crédito"
+                if tiene_debito
+                else "Monto inválido o igual a cero"
+            )
+            _agregar_fila_invalida(
+                filas_invalidas, numero_fila, fecha, "", cheque or referencia,
+                descripcion, monto, detalle,
+            )
+            continue
+        if tiene_debito:
             movimiento = {
                 "Num_cheque": cheque or referencia,
                 "Monto": abs(debito), "fecha": fecha,
@@ -345,7 +468,7 @@ def _leer_csv_banrural(archivo):
             else:
                 movimiento["tipo"] = "ND"
                 notas_debito.append(movimiento)
-        elif credito is not None and credito != 0:
+        else:
             depositos.append({
                 "Num_cheque": referencia, "Monto": abs(credito),
                 "fecha": fecha, "tipo": "DP", "descripcion": descripcion,
@@ -359,6 +482,7 @@ def _leer_csv_banrural(archivo):
         "depositos": depositos,
         "notas_credito": [],
         "notas_debito": notas_debito,
+        "filas_invalidas": filas_invalidas,
         "cuenta_numero": cuenta_numero,
         "cuenta_nombre": cuenta_nombre,
         "fecha_inicio": fecha_inicio,
@@ -427,19 +551,31 @@ def _leer_csv_bac(archivo):
     cabecera = [valor.strip().casefold() for valor in filas[indice_cabecera]]
     columnas = {nombre: indice for indice, nombre in enumerate(cabecera)}
     cheques, depositos, notas_debito = [], [], []
+    filas_invalidas = []
     fechas = []
-    for fila in filas[indice_cabecera + 1:]:
+    for numero_fila, fila in enumerate(
+        filas[indice_cabecera + 1:], start=indice_cabecera + 2
+    ):
         fila += [""] * (len(cabecera) - len(fila))
+        if fila[0].strip().casefold() == "resumen de estado bancario":
+            break
+        if not any(valor.strip() for valor in fila):
+            continue
         fecha = fila[columnas["fecha de transacción"]].strip()
         fecha_normalizada = _fecha_bancaria(fecha)
-        if fecha_normalizada is None:
-            continue
-        fechas.append(fecha_normalizada)
         referencia = fila[columnas["referencia de transacción"]].strip()
         codigo = fila[columnas["código de transacción"]].strip().upper()
         descripcion = fila[columnas["descripción de transacción"]].strip()
-        debito = convertir_monto(fila[columnas["débito de transacción"]])
-        credito = convertir_monto(fila[columnas["crédito de transacción"]])
+        debito_original = fila[columnas["débito de transacción"]].strip()
+        credito_original = fila[columnas["crédito de transacción"]].strip()
+        debito = convertir_monto(debito_original)
+        credito = convertir_monto(credito_original)
+        if fecha_normalizada is None:
+            _agregar_fila_invalida(
+                filas_invalidas, numero_fila, fecha, codigo, referencia,
+                descripcion, None, "Fecha inválida",
+            )
+            continue
         indice_balance = columnas.get("balance de transacción")
         saldo_movimiento = (
             convertir_monto(fila[indice_balance])
@@ -448,17 +584,38 @@ def _leer_csv_bac(archivo):
         )
         if saldo_movimiento is not None:
             saldo_final_movimientos = saldo_movimiento
+        tiene_debito = debito is not None and debito != 0
+        tiene_credito = credito is not None and credito != 0
+        if tiene_debito == tiene_credito:
+            if debito == 0 and credito == 0:
+                continue
+            monto = (
+                abs(debito or credito)
+                if debito is not None or credito is not None
+                else None
+            )
+            detalle = (
+                "La fila contiene débito y crédito"
+                if tiene_debito
+                else "Monto inválido o igual a cero"
+            )
+            _agregar_fila_invalida(
+                filas_invalidas, numero_fila, fecha, codigo, referencia,
+                descripcion, monto, detalle,
+            )
+            continue
+        fechas.append(fecha_normalizada)
         movimiento = {
             "Num_cheque": referencia,
             "fecha": fecha,
             "descripcion": descripcion,
         }
         es_cheque = codigo in {"CH", "CQ", "CK"} or "CHEQUE" in descripcion.upper()
-        if debito is not None and debito != 0:
+        if tiene_debito:
             movimiento["Monto"] = abs(debito)
             movimiento["tipo"] = "CQ" if es_cheque else "ND"
             (cheques if es_cheque else notas_debito).append(movimiento)
-        elif credito is not None and credito != 0:
+        else:
             movimiento["Monto"] = abs(credito)
             movimiento["tipo"] = "DP"
             depositos.append(movimiento)
@@ -487,6 +644,7 @@ def _leer_csv_bac(archivo):
         "depositos": depositos,
         "notas_credito": [],
         "notas_debito": notas_debito,
+        "filas_invalidas": filas_invalidas,
         "cuenta_numero": cuenta_numero,
         "cuenta_nombre": cuenta_nombre,
         "fecha_inicio": fecha_inicio,
@@ -811,6 +969,25 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
         for cheque in cheques:
             cheque.update(detalles_cheques.get(cheque["num"], {}))
 
+        filas_invalidas = []
+        for alerta in estado_banco.get("filas_invalidas", []):
+            fecha_alerta = alerta.get("fecha") or "N/D"
+            numero_alerta = alerta.get("numero") or f"Fila {alerta['fila']}"
+            tipo_alerta = alerta.get("tipo")
+            descripcion_alerta = alerta.get("descripcion") or "Sin descripción"
+            if tipo_alerta:
+                descripcion_alerta = f"[{tipo_alerta}] {descripcion_alerta}"
+            filas_invalidas.append(
+                {
+                    "num": numero_alerta,
+                    "fecha": _fecha_bancaria(fecha_alerta) or fecha_alerta,
+                    "descripcion": descripcion_alerta,
+                    "monto": alerta.get("monto"),
+                    "diferencia": alerta["detalle"],
+                    "fila": alerta["fila"],
+                }
+            )
+
         no_registrados = []
         cheques_banco_sin_registro = []
         lista_nuestros_nums = set(df_nuestro["Num_norm"].dropna().tolist())
@@ -862,6 +1039,18 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                     "monto": monto_banco,
                     "resultado": "INVALIDO",
                     "mensaje": mensaje,
+                }
+            )
+            filas_invalidas.append(
+                {
+                    "num": num_texto,
+                    "fecha": _fecha_bancaria(fila_banco.get("fecha")) or "N/D",
+                    "descripcion": _texto_celda(
+                        fila_banco.get("descripcion")
+                    ) or "Sin descripción",
+                    "monto": monto_banco,
+                    "diferencia": "Número de cheque inválido",
+                    "fila": None,
                 }
             )
 
@@ -1010,6 +1199,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             "cheques_cobrados": cheques_cobrados,
             "cheques_transito": cheques_transito,
             "cheques_banco_sin_registro": cheques_banco_sin_registro,
+            "filas_invalidas": filas_invalidas,
             "depositos_no_ingresados": depositos_no_ingresados,
             "notas_debito_no_ingresadas": notas_debito_no_ingresadas,
             "depositos_banco_sin_registro": depositos_banco_sin_registro,
@@ -1023,6 +1213,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 "cheques_banco_sin_registro": resumen(
                     cheques_banco_sin_registro
                 ),
+                "filas_invalidas": resumen(filas_invalidas),
                 "depositos_no_ingresados": resumen(depositos_no_ingresados),
                 "depositos_banco_sin_registro": resumen(depositos_banco_sin_registro),
                 "notas_credito_banco": resumen(notas_credito_banco),

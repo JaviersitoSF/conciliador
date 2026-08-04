@@ -41,6 +41,13 @@ def _resultado_base():
         },
         "cheques_transito": cheques,
         "cheques_banco_sin_registro": cheques_banco_sin_registro,
+        "filas_invalidas": [{
+            "num": "Fila 10",
+            "fecha": "fecha mala",
+            "descripcion": "Movimiento inválido",
+            "monto": None,
+            "diferencia": "Fecha inválida",
+        }],
         "depositos_no_ingresados": depositos_transito,
         "depositos_banco_sin_registro": creditos_banco,
         "notas_credito_banco": notas_credito,

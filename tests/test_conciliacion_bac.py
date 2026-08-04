@@ -10,6 +10,7 @@ def crear_estado_bac(ruta, movimientos=None, saldo_libros="125.00"):
             "01/06/2026, 437706449, DP, DEPOSITO EN EFECTIVO, 0.00, 50.00, 150.00",
             "02/06/2026, 900477799, MD, TF:ACH PERSONAS, 20.00, 0.00, 130.00",
             "03/06/2026, 1466, CK, PAGO CHEQUE 1466, 5.00, 0.00, 125.00",
+            "04/06/2026, ERROR, DP, FILA INVALIDA, malo, 0.00, 125.00",
         ]
     contenido = "\n".join([
         "Número de Clientes, Nombre, Producto, Moneda, Saldo Inicial, Saldo en Libros, Retenidos y Diferidos, Saldo Disponible, Fecha",
@@ -38,6 +39,10 @@ def test_lector_bac_clasifica_movimientos_y_metadatos(tmp_path):
     assert estado["depositos"][0]["Monto"] == Decimal("50.00")
     assert estado["notas_debito"][0]["Monto"] == Decimal("20.00")
     assert estado["cheques"].iloc[0]["Num_cheque"] == "1466"
+    assert estado["filas_invalidas"][0]["numero"] == "ERROR"
+    assert estado["filas_invalidas"][0]["detalle"] == (
+        "Monto inválido o igual a cero"
+    )
 
 
 def test_cuenta_acepta_formato_bac(tmp_path, monkeypatch):
