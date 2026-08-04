@@ -463,6 +463,22 @@ def _leer_csv_bac(archivo):
             movimiento["tipo"] = "DP"
             depositos.append(movimiento)
 
+    fecha_inicio = min(fechas) if fechas else None
+    if fecha_fin:
+        # La interfaz concilia meses completos aunque el primer movimiento
+        # bancario haya ocurrido varios días después del inicio del mes.
+        fecha_inicio = (
+            datetime.fromisoformat(fecha_fin).date().replace(day=1).isoformat()
+        )
+    # En exportaciones históricas de BAC, "Saldo en Libros" puede reflejar el
+    # saldo al descargar el archivo. El balance de la última transacción sí
+    # corresponde al corte y cuadra con el saldo inicial y los movimientos.
+    saldo_corte = (
+        saldo_final_movimientos
+        if saldo_final_movimientos is not None
+        else saldo_final
+    )
+
     return {
         "cheques": pd.DataFrame(
             cheques, columns=["Num_cheque", "Monto", "fecha", "tipo", "descripcion"]
@@ -473,11 +489,11 @@ def _leer_csv_bac(archivo):
         "notas_debito": notas_debito,
         "cuenta_numero": cuenta_numero,
         "cuenta_nombre": cuenta_nombre,
-        "fecha_inicio": min(fechas) if fechas else None,
+        "fecha_inicio": fecha_inicio,
         "fecha_fin": fecha_fin or (max(fechas) if fechas else None),
         "moneda": "GTQ" if moneda_bac in {"QTZ", "GTQ"} else moneda_bac,
         "saldo_inicial": saldo_inicial,
-        "saldo_final": saldo_final if saldo_final is not None else saldo_final_movimientos,
+        "saldo_final": saldo_corte,
     }
 
 
