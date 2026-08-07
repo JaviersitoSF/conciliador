@@ -10,6 +10,7 @@ from .movements import (
     anular_cheque_numero,
     anular_deposito_numero,
     anular_nota_debito_numero,
+    buscar_posibles_duplicados_deposito,
     cargar_cheques_registrados,
     cargar_depositos_registrados,
     cargar_notas_debito_registradas,

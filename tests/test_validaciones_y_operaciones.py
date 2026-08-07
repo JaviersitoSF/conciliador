@@ -351,6 +351,43 @@ def test_anular_deposito_conserva_datos_y_no_duplica_auditoria():
         ]
     assert acciones == ["CREAR", "ANULAR"]
 
+
+def test_buscar_posibles_duplicados_deposito_limita_cuenta_y_exclusiones():
+    cuenta_id = main.crear_cuenta_bancaria("BANCO A", "Operativa", "001")
+    otra_cuenta_id = main.crear_cuenta_bancaria("BANCO B", "Operativa", "002")
+    main.registrar_deposito_datos(
+        "400.95", "Vistares", fecha="2026-06-01",
+        cuenta_id=cuenta_id, numero="1134566",
+    )
+    main.registrar_deposito_datos(
+        "400.95", "Otra cuenta", fecha="2026-06-01",
+        cuenta_id=otra_cuenta_id, numero="OTRO",
+    )
+    deposito_id = int(
+        main.cargar_depositos_registrados(cuenta_id).iloc[0]["Id"]
+    )
+
+    coincidencias = main.buscar_posibles_duplicados_deposito(
+        "2026-06-01", "400.95", cuenta_id
+    )
+
+    assert coincidencias == [{
+        "id": deposito_id,
+        "numero": "1134566",
+        "fecha": "2026-06-01",
+        "descripcion": "VISTARES",
+        "monto": "400.95",
+        "estado": "REGISTRADO",
+    }]
+    assert main.buscar_posibles_duplicados_deposito(
+        "2026-06-01", "400.95", cuenta_id, excluir_id=deposito_id
+    ) == []
+
+    main.anular_deposito_numero("1134566", cuenta_id)
+    assert main.buscar_posibles_duplicados_deposito(
+        "2026-06-01", "400.95", cuenta_id
+    ) == []
+
 def test_editar_cheque_actualiza_datos_y_registra_auditoria():
     main.guardar_cheque_en_archivo(
         "10", "2026-06-01", "PROVEEDOR", "25", "COMPRA"

@@ -44,6 +44,11 @@ class ConciliadorService:
     def registrar_deposito(self, *args, **kwargs):
         return self.operations.registrar_deposito_datos(*args, **kwargs)
 
+    def buscar_posibles_duplicados_deposito(self, *args, **kwargs):
+        return self.operations.buscar_posibles_duplicados_deposito(
+            *args, **kwargs
+        )
+
     def actualizar_deposito(self, *args, **kwargs):
         return self.operations.actualizar_deposito(*args, **kwargs)
 

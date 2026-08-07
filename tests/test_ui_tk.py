@@ -171,8 +171,18 @@ def test_registrar_deposito_incluye_numero():
         cuenta_id_actual=Mock(return_value=7),
         refrescar_todo=Mock(),
     )
+    app._confirmar_posible_duplicado_deposito = (
+        lambda fecha, monto, deposito_id=None:
+        ui_tk.ConciliadorApp._confirmar_posible_duplicado_deposito(
+            app, fecha, monto, deposito_id
+        )
+    )
 
     with patch.object(
+        ui_tk.service,
+        "buscar_posibles_duplicados_deposito",
+        return_value=[],
+    ), patch.object(
         ui_tk.service,
         "registrar_deposito",
         return_value={"mensaje": "Depósito registrado"},
@@ -187,6 +197,54 @@ def test_registrar_deposito_incluye_numero():
         numero="DEP-18",
     )
     assert entradas[0].eliminada
+
+
+def test_registrar_deposito_advierte_y_respeta_cancelacion_por_duplicado():
+    entradas = [
+        EntradaFalsa("DEP-19"),
+        EntradaFalsa("Venta"),
+        EntradaFalsa("400.95"),
+        EntradaFalsa("2026-06-01"),
+    ]
+    app = SimpleNamespace(
+        deposito_num=entradas[0],
+        deposito_desc=entradas[1],
+        deposito_monto=entradas[2],
+        deposito_fecha=entradas[3],
+        cuenta_id_actual=Mock(return_value=7),
+    )
+    app._confirmar_posible_duplicado_deposito = (
+        lambda fecha, monto, deposito_id=None:
+        ui_tk.ConciliadorApp._confirmar_posible_duplicado_deposito(
+            app, fecha, monto, deposito_id
+        )
+    )
+    existente = {
+        "id": 32762,
+        "numero": "1134566",
+        "fecha": "2026-06-01",
+        "descripcion": "VISTARES 30/5/2026",
+        "monto": "400.95",
+        "estado": "REGISTRADO",
+    }
+
+    with patch.object(
+        ui_tk.service,
+        "buscar_posibles_duplicados_deposito",
+        return_value=[existente],
+    ) as buscar, patch.object(
+        ui_tk.messagebox, "askyesno", return_value=False
+    ) as confirmar, patch.object(
+        ui_tk.service, "registrar_deposito"
+    ) as registrar:
+        ui_tk.ConciliadorApp._registrar_deposito(app)
+
+    buscar.assert_called_once_with(
+        "2026-06-01", "400.95", 7, excluir_id=None
+    )
+    assert "1134566 (registro 32762)" in confirmar.call_args.args[1]
+    registrar.assert_not_called()
+    assert all(not entrada.eliminada for entrada in entradas)
 
 
 def test_emitir_cheque_rechaza_descripcion_vacia_como_la_tui():
@@ -285,6 +343,12 @@ def test_actualizar_deposito_envia_datos_del_dialogo():
         cuenta_id_actual=Mock(return_value=7),
         refrescar_todo=Mock(),
     )
+    app._confirmar_posible_duplicado_deposito = (
+        lambda fecha, monto, deposito_id=None:
+        ui_tk.ConciliadorApp._confirmar_posible_duplicado_deposito(
+            app, fecha, monto, deposito_id
+        )
+    )
     valores = {
         "numero": "DEP-2",
         "fecha": "2026-06-15",
@@ -294,6 +358,10 @@ def test_actualizar_deposito_envia_datos_del_dialogo():
 
     with patch.object(
         ui_tk.service,
+        "buscar_posibles_duplicados_deposito",
+        return_value=[],
+    ) as buscar, patch.object(
+        ui_tk.service,
         "actualizar_deposito",
         return_value={"mensaje": "Depósito actualizado"},
     ) as actualizar, patch.object(ui_tk.messagebox, "showinfo"):
@@ -301,6 +369,9 @@ def test_actualizar_deposito_envia_datos_del_dialogo():
 
     actualizar.assert_called_once_with(
         4, "DEP-2", "2026-06-15", "Venta", "100", 7
+    )
+    buscar.assert_called_once_with(
+        "2026-06-15", "100", 7, excluir_id=4
     )
     app.refrescar_todo.assert_called_once_with()
 

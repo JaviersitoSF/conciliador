@@ -646,8 +646,45 @@ class ConciliadorApp(tk.Tk):
             self.boton_registrar_deposito, self._registrar_deposito
         )
 
+    def _confirmar_posible_duplicado_deposito(
+        self, fecha, monto, deposito_id=None
+    ):
+        coincidencias = service.buscar_posibles_duplicados_deposito(
+            fecha,
+            monto,
+            self.cuenta_id_actual(),
+            excluir_id=deposito_id,
+        )
+        if not coincidencias:
+            return True
+
+        detalles = []
+        for deposito in coincidencias[:5]:
+            numero = deposito["numero"] or "S/N"
+            detalles.append(
+                f"• {numero} (registro {deposito['id']}): "
+                f"{deposito['fecha']} · Q {deposito['monto']} · "
+                f"{deposito['descripcion']}"
+            )
+        if len(coincidencias) > 5:
+            detalles.append(f"• Y {len(coincidencias) - 5} más")
+
+        return messagebox.askyesno(
+            "Posible depósito duplicado",
+            "Ya existe al menos un depósito vigente en esta cuenta con la "
+            "misma fecha y monto:\n\n"
+            + "\n".join(detalles)
+            + "\n\n¿Desea guardar el depósito de todas formas?",
+            icon="warning",
+            parent=self,
+        )
+
     def _registrar_deposito(self):
         try:
+            if not self._confirmar_posible_duplicado_deposito(
+                self.deposito_fecha.get(), self.deposito_monto.get()
+            ):
+                return
             resultado = service.registrar_deposito(
                 self.deposito_monto.get(),
                 self.deposito_desc.get(),
@@ -765,6 +802,10 @@ class ConciliadorApp(tk.Tk):
 
     def _actualizar_deposito(self, deposito_id, valores):
         try:
+            if not self._confirmar_posible_duplicado_deposito(
+                valores["fecha"], valores["monto"], deposito_id
+            ):
+                return False
             resultado = service.actualizar_deposito(
                 deposito_id,
                 valores["numero"],

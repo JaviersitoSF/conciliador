@@ -152,6 +152,44 @@ def cargar_depositos_registrados(cuenta_id=None, busqueda=None):
     )
 
 
+def buscar_posibles_duplicados_deposito(
+    fecha, monto, cuenta_id=None, excluir_id=None
+):
+    """Busca depósitos vigentes con la misma cuenta, fecha y monto."""
+    cuenta = obtener_cuenta(cuenta_id)
+    fecha = normalizar_fecha(fecha)
+    monto = convertir_monto(monto)
+    if monto is None:
+        raise ErrorOperacion("⚠️ Error: Solo usar números y punto decimal.")
+    if monto <= 0:
+        raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
+
+    parametros = [cuenta["id"], fecha, formatear_monto(monto)]
+    condicion_exclusion = ""
+    if excluir_id is not None:
+        try:
+            excluir_id = int(excluir_id)
+        except (TypeError, ValueError) as e:
+            raise ErrorOperacion("⚠️ Depósito inválido.") from e
+        condicion_exclusion = " AND id <> ?"
+        parametros.append(excluir_id)
+
+    inicializar_db()
+    with conectar_db() as conexion:
+        filas = conexion.execute(
+            f"""
+            SELECT id, numero, fecha, descripcion, monto, estado
+            FROM depositos
+            WHERE cuenta_id = ? AND fecha = ? AND monto = ?
+              AND estado <> 'ANULADO'{condicion_exclusion}
+            ORDER BY id
+            """,
+            parametros,
+        ).fetchall()
+
+    return [dict(fila) for fila in filas]
+
+
 def cargar_notas_debito_registradas(cuenta_id=None, busqueda=None):
     return _cargar_movimientos_registrados(
         "notas_debito", "n", cuenta_id, busqueda
