@@ -218,6 +218,13 @@ def test_conciliacion_bi_funciona_sin_cheques_locales_ni_bancarios():
     cuenta_id = main.crear_cuenta_bancaria(
         "BANCO INDUSTRIAL", "Ahorro", "0000625485"
     )
+    main.registrar_deposito_datos(
+        "0.96",
+        "INTERESES GANADOS",
+        fecha="2026-06-30",
+        numero="2622370",
+        cuenta_id=cuenta_id,
+    )
     crear_estado_bi(
         "ahorro.csv",
         cuenta="0000625485",
@@ -234,9 +241,8 @@ def test_conciliacion_bi_funciona_sin_cheques_locales_ni_bancarios():
     assert resultado["cheques"] == []
     assert len(resultado["no_registrados"]) == 1
     assert resultado["no_registrados"][0]["resultado"] == "CARGO_BANCO"
-    assert resultado["filas_invalidas"][0]["diferencia"] == (
-        "Tipo de movimiento no reconocido: CA"
-    )
+    assert resultado["filas_invalidas"] == []
+    assert resultado["diferencias_depositos"] == []
 
 
 def test_conciliacion_presenta_las_cuatro_categorias_contables():

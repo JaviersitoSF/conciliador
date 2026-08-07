@@ -183,7 +183,7 @@ def _leer_csv_banco_industrial(archivo):
             cheques.append(movimiento)
         elif tipo in {"DE", "DP"}:
             depositos.append(movimiento)
-        elif tipo == "NC":
+        elif tipo in {"NC", "CA"}:
             notas_credito.append(movimiento)
         elif tipo == "ND":
             notas_debito.append(movimiento)
