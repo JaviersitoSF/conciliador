@@ -10,7 +10,10 @@ from . import printing
 from .storage import (conectar_db, crear_respaldo_posterior, inicializar_db,
     obtener_cuenta, obtener_formato_impresion, registrar_auditoria, transaccion)
 
-COLUMNAS_CHEQUES = ["Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Nombre", "Monto", "Estado", "Descripcion"]
+COLUMNAS_CHEQUES = [
+    "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Nombre",
+    "Monto", "Estado", "Fecha_cobro", "Descripcion",
+]
 COLUMNAS_MOVIMIENTOS = [
     "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion",
     "Monto", "Estado",
@@ -71,6 +74,7 @@ def cargar_cheques_registrados(cuenta_id=None, busqueda=None):
             SELECT c.id AS Id, c.cuenta_id AS Cuenta_id, cb.banco AS Banco,
                    cb.nombre AS Cuenta, c.numero AS Num, c.fecha AS Fecha,
                    c.nombre AS Nombre, c.monto AS Monto, c.estado AS Estado,
+                   COALESCE(c.fecha_cobro, '') AS Fecha_cobro,
                    c.descripcion AS Descripcion
             FROM cheques c
             JOIN cuentas_bancarias cb ON cb.id = c.cuenta_id
@@ -82,7 +86,7 @@ def cargar_cheques_registrados(cuenta_id=None, busqueda=None):
             parametros.append(obtener_cuenta(cuenta_id)["id"])
         if patron is not None:
             columnas_busqueda = (
-                "c.numero", "c.fecha", "c.nombre", "c.descripcion",
+                "c.numero", "c.fecha", "c.fecha_cobro", "c.nombre", "c.descripcion",
                 "c.monto", "c.estado",
             )
             condiciones.append(_condicion_busqueda(columnas_busqueda))
@@ -560,7 +564,8 @@ def guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_
     crear_respaldo_posterior()
 
 def actualizar_cheque(
-    cheque_id, numero, fecha, nombre, monto, descripcion="", cuenta_id=None
+    cheque_id, numero, fecha, nombre, monto, descripcion="", cuenta_id=None,
+    fecha_cobro=None, contrasena_admin=None,
 ):
     cuenta = obtener_cuenta(cuenta_id)
     try:
@@ -581,12 +586,19 @@ def actualizar_cheque(
         raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
     nombre = nombre.upper()
     descripcion = str(descripcion or "").strip().upper()
+    fecha_cobro = str(fecha_cobro or "").strip()
+    if fecha_cobro:
+        fecha_cobro = normalizar_fecha(fecha_cobro)
+        if fecha_cobro < fecha:
+            raise ErrorOperacion(
+                "La fecha de cobro no puede ser anterior a la emisión del cheque."
+            )
 
     try:
         with transaccion() as conexion:
             cheque = conexion.execute(
                 """
-                SELECT estado FROM cheques
+                SELECT estado, COALESCE(fecha_cobro, '') AS fecha_cobro FROM cheques
                 WHERE id = ? AND cuenta_id = ?
                 """,
                 (cheque_id, cuenta["id"]),
@@ -595,16 +607,21 @@ def actualizar_cheque(
                 raise ErrorOperacion("⚠️ El cheque no existe en esta cuenta.")
             if cheque["estado"] == "ANULADO":
                 raise ErrorOperacion("⚠️ Un cheque anulado no se puede editar.")
+            if fecha_cobro != cheque["fecha_cobro"]:
+                from .storage import verificar_contrasena_admin
+                if not verificar_contrasena_admin(contrasena_admin, conexion):
+                    raise ErrorOperacion("Contraseña administrativa incorrecta.")
             conexion.execute(
                 """
                 UPDATE cheques
                 SET numero = ?, fecha = ?, nombre = ?, monto = ?,
-                    descripcion = ?, actualizado_en = CURRENT_TIMESTAMP
+                    descripcion = ?, fecha_cobro = NULLIF(?, ''),
+                    actualizado_en = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (
                     numero, fecha, nombre, formatear_monto(monto),
-                    descripcion, cheque_id,
+                    descripcion, fecha_cobro, cheque_id,
                 ),
             )
             registrar_auditoria(
@@ -613,7 +630,8 @@ def actualizar_cheque(
                 "CHEQUE",
                 cheque_id,
                 f"{cuenta['banco']} / {cuenta['nombre']}: cheque {numero} "
-                f"actualizado a Q {formatear_monto(monto)} para {nombre}",
+                f"actualizado a Q {formatear_monto(monto)} para {nombre}; "
+                f"fecha de cobro: {fecha_cobro or 'sin fecha'}",
             )
     except sqlite3.IntegrityError as e:
         raise ErrorOperacion(
@@ -621,6 +639,37 @@ def actualizar_cheque(
         ) from e
     crear_respaldo_posterior()
     return {"id": cheque_id, "mensaje": f"✅ Cheque {numero} actualizado."}
+
+
+def registrar_fechas_cobro(cuenta_id, fechas_por_numero):
+    """Actualiza fechas confirmadas por el banco en una sola transacción."""
+    cuenta = obtener_cuenta(cuenta_id)
+    fechas = [
+        (normalizar_numero_cheque(numero), normalizar_fecha(fecha_cobro))
+        for numero, fecha_cobro in fechas_por_numero
+    ]
+    actualizados = 0
+    with transaccion() as conexion:
+        for numero, fecha_cobro in fechas:
+            cursor = conexion.execute(
+                "UPDATE cheques SET fecha_cobro = ?, actualizado_en = CURRENT_TIMESTAMP "
+                "WHERE cuenta_id = ? AND numero = ? "
+                "AND COALESCE(fecha_cobro, '') != ?",
+                (fecha_cobro, cuenta["id"], numero, fecha_cobro),
+            )
+            if cursor.rowcount:
+                actualizados += cursor.rowcount
+                registrar_auditoria(
+                    conexion, "COBRAR", "CHEQUE", numero,
+                    f"{cuenta['banco']} / {cuenta['nombre']}: cobrado el {fecha_cobro}",
+                )
+    if actualizados:
+        crear_respaldo_posterior()
+    return actualizados
+
+
+def registrar_fecha_cobro(cuenta_id, numero, fecha_cobro):
+    return bool(registrar_fechas_cobro(cuenta_id, [(numero, fecha_cobro)]))
 
 def eliminar_cheque(cheque_id, cuenta_id=None):
     cuenta = obtener_cuenta(cuenta_id)

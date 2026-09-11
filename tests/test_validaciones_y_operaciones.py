@@ -34,6 +34,31 @@ def test_normalizar_numero_cheque_acepta_enteros_de_excel(valor, esperado):
     assert main.normalizar_numero_cheque(valor) == esperado
 
 
+def test_fecha_cobro_solo_se_edita_con_contrasena_admin():
+    main.guardar_cheque_en_archivo("18", "2026-06-01", "A", "10")
+    cheque_id = int(main.cargar_cheques_registrados().iloc[0]["Id"])
+    main.establecer_contrasena_admin("muevelo-muevelo")
+
+    with pytest.raises(main.ErrorOperacion, match="incorrecta"):
+        main.actualizar_cheque(
+            cheque_id, "18", "2026-06-01", "A", "10",
+            cuenta_id=1, fecha_cobro="2026-06-10", contrasena_admin="mala",
+        )
+
+    main.actualizar_cheque(
+        cheque_id, "18", "2026-06-01", "A", "10",
+        cuenta_id=1, fecha_cobro="2026-06-10",
+        contrasena_admin="muevelo-muevelo",
+    )
+
+    assert main.cargar_cheques_registrados().iloc[0]["Fecha_cobro"] == "2026-06-10"
+    with main.conectar_db() as conexion:
+        valor = conexion.execute(
+            "SELECT valor FROM configuracion WHERE clave = 'admin_password'"
+        ).fetchone()[0]
+    assert "muevelo-muevelo" not in valor
+
+
 @pytest.mark.parametrize(
     "fecha",
     ["2026/06/01", "01-06-2026", "2026-02-30", "2026-6-1", "", "no-fecha"],

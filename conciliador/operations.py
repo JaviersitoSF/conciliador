@@ -21,6 +21,8 @@ from .movements import (
     emitir_cheque_datos,
     formatear_monto,
     guardar_cheque_en_archivo,
+    registrar_fecha_cobro,
+    registrar_fechas_cobro,
     registrar_deposito_datos,
     registrar_nota_debito_datos,
     reimprimir_cheque_numero,
@@ -49,6 +51,9 @@ from .storage import (
     obtener_formato_impresion,
     registrar_auditoria,
     transaccion,
+    establecer_contrasena_admin,
+    tiene_contrasena_admin,
+    verificar_contrasena_admin,
 )
 from . import storage
 

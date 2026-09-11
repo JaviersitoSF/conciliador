@@ -1,4 +1,7 @@
 import os
+import hashlib
+import hmac
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -69,6 +72,7 @@ def inicializar_db():
                 estado TEXT NOT NULL DEFAULT 'TRANSITO'
                     CHECK (estado IN ('TRANSITO', 'ANULADO')),
                 descripcion TEXT NOT NULL DEFAULT '',
+                fecha_cobro TEXT,
                 creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (cuenta_id, numero),
@@ -112,6 +116,11 @@ def inicializar_db():
                 detalle TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS configuracion (
+                clave TEXT PRIMARY KEY,
+                valor TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS formatos_impresion (
                 cuenta_id INTEGER PRIMARY KEY,
                 ancho REAL NOT NULL,
@@ -148,6 +157,15 @@ def inicializar_db():
                 "TEXT NOT NULL DEFAULT 'GTQ' "
                 "CHECK (moneda IN ('GTQ', 'USD'))"
             )
+        columnas_cheque = {
+            fila[1] for fila in conexion.execute("PRAGMA table_info(cheques)")
+        }
+        if "fecha_cobro" not in columnas_cheque:
+            conexion.execute("ALTER TABLE cheques ADD COLUMN fecha_cobro TEXT")
+            conexion.execute(
+                "UPDATE cheques SET fecha_cobro = date('now', 'localtime') "
+                "WHERE estado != 'ANULADO'"
+            )
         conexion.execute(
             """
             INSERT OR IGNORE INTO cuentas_bancarias (id, banco, nombre, numero)
@@ -155,6 +173,56 @@ def inicializar_db():
             """
         )
         _insertar_formato_default(conexion, 1)
+
+
+def tiene_contrasena_admin():
+    inicializar_db()
+    with conectar_db() as conexion:
+        return conexion.execute(
+            "SELECT 1 FROM configuracion WHERE clave = 'admin_password'"
+        ).fetchone() is not None
+
+
+def establecer_contrasena_admin(contrasena, contrasena_actual=None):
+    contrasena = str(contrasena or "")
+    if len(contrasena) < 8:
+        raise ErrorOperacion("La contraseña administrativa debe tener al menos 8 caracteres.")
+    if tiene_contrasena_admin() and not verificar_contrasena_admin(contrasena_actual):
+        raise ErrorOperacion("Contraseña administrativa incorrecta.")
+    sal = secrets.token_bytes(16)
+    derivada = hashlib.pbkdf2_hmac("sha256", contrasena.encode(), sal, 300_000)
+    valor = f"pbkdf2_sha256$300000${sal.hex()}${derivada.hex()}"
+    with transaccion() as conexion:
+        conexion.execute(
+            "INSERT INTO configuracion (clave, valor) VALUES ('admin_password', ?) "
+            "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+            (valor,),
+        )
+
+
+def verificar_contrasena_admin(contrasena, conexion=None):
+    if conexion is None:
+        inicializar_db()
+        with conectar_db() as conexion_lectura:
+            fila = conexion_lectura.execute(
+                "SELECT valor FROM configuracion WHERE clave = 'admin_password'"
+            ).fetchone()
+    else:
+        fila = conexion.execute(
+            "SELECT valor FROM configuracion WHERE clave = 'admin_password'"
+        ).fetchone()
+    if fila is None or not contrasena:
+        return False
+    try:
+        algoritmo, iteraciones, sal, esperada = fila["valor"].split("$")
+        if algoritmo != "pbkdf2_sha256":
+            return False
+        derivada = hashlib.pbkdf2_hmac(
+            "sha256", str(contrasena).encode(), bytes.fromhex(sal), int(iteraciones)
+        )
+        return hmac.compare_digest(derivada.hex(), esperada)
+    except (TypeError, ValueError):
+        return False
 
 def _insertar_formato_default(conexion, cuenta_id):
     campos = ", ".join(FORMATO_IMPRESION_DEFAULT)

@@ -62,6 +62,7 @@ CREATE TABLE cheques (
     estado TEXT NOT NULL DEFAULT 'TRANSITO'
         CHECK (estado IN ('TRANSITO', 'ANULADO')),
     descripcion TEXT NOT NULL DEFAULT '',
+    fecha_cobro TEXT,
     creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (cuenta_id, numero),
@@ -87,6 +88,10 @@ CREATE TABLE auditoria (
     entidad TEXT NOT NULL,
     entidad_id TEXT,
     detalle TEXT NOT NULL
+);
+CREATE TABLE configuracion (
+    clave TEXT PRIMARY KEY,
+    valor TEXT NOT NULL
 );
 CREATE TABLE formatos_impresion (
     cuenta_id INTEGER PRIMARY KEY,
@@ -287,6 +292,22 @@ def _upgrade_8(connection):
         )
 
 
+def _upgrade_9(connection):
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(cheques)")
+    }
+    if "fecha_cobro" not in columns:
+        connection.execute("ALTER TABLE cheques ADD COLUMN fecha_cobro TEXT")
+    connection.execute(
+        "UPDATE cheques SET fecha_cobro = date('now', 'localtime') "
+        "WHERE fecha_cobro IS NULL AND estado != 'ANULADO'"
+    )
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS configuracion ("
+        "clave TEXT PRIMARY KEY, valor TEXT NOT NULL)"
+    )
+
+
 MIGRATIONS = (
     Migration(1, "esquema_inicial", _upgrade_1),
     Migration(2, "numero_deposito", _upgrade_2),
@@ -296,6 +317,7 @@ MIGRATIONS = (
     Migration(6, "formato_conciliacion_banrural", _upgrade_6),
     Migration(7, "formato_conciliacion_bac", _upgrade_7),
     Migration(8, "moneda_cuenta", _upgrade_8),
+    Migration(9, "fecha_cobro_y_acceso_admin", _upgrade_9),
 )
 LATEST_VERSION = MIGRATIONS[-1].version
 

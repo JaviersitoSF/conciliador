@@ -8,7 +8,13 @@ import pandas as pd
 
 from .domain import convertir_monto, normalizar_fecha, normalizar_numero_cheque
 from .errors import ErrorOperacion
-from .movements import cargar_cheques_registrados, cargar_depositos_registrados, cargar_notas_debito_registradas, formatear_monto
+from .movements import (
+    cargar_cheques_registrados,
+    cargar_depositos_registrados,
+    cargar_notas_debito_registradas,
+    formatear_monto,
+    registrar_fechas_cobro,
+)
 from .storage import obtener_cuenta
 
 PATRON_CUENTA_BI = re.compile(r"^Cuenta:\s*([0-9]+)\s*-\s*(.+)$", re.IGNORECASE)
@@ -872,6 +878,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
         df_banco = df_banco[df_banco["Num_norm"].notna()].copy()
 
         cheques = []
+        fechas_cobro_detectadas = []
         for _, fila in df_nuestro.iterrows():
             num = fila["Num_norm"]
             if not num:
@@ -879,6 +886,14 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
 
             cobrado = df_banco[df_banco["Num_norm"] == num]
             estado = str(fila.get("Estado", "")).upper()
+            fecha_cobro_guardada = _texto_celda(fila.get("Fecha_cobro", ""))
+            fecha_cobro_banco = (
+                _fecha_bancaria(cobrado.iloc[0].get("fecha"))
+                if len(cobrado) == 1
+                else None
+            )
+            if fecha_cobro_banco:
+                fechas_cobro_detectadas.append((num, fecha_cobro_banco))
 
             if estado == "ANULADO":
                 if cobrado.empty:
@@ -934,7 +949,6 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 continue
 
             monto_banco = cobrado.iloc[0]["Monto_valor"]
-
             if monto_nuestro is None or monto_banco is None:
                 mensaje = f"⚠️ No pude comparar el monto del cheque {num} por datos inválidos."
                 resultado = "INVALIDO"
@@ -954,9 +968,12 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                     "resultado": resultado,
                     "monto_nuestro": monto_nuestro,
                     "monto_banco": monto_banco,
+                    "fecha_cobro": fecha_cobro_guardada or fecha_cobro_banco or "",
                     "mensaje": mensaje,
                 }
             )
+
+        registrar_fechas_cobro(cuenta["id"], fechas_cobro_detectadas)
 
         detalles_cheques = {
             fila["Num_norm"]: {
@@ -1148,29 +1165,31 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
         for fila in notas_debito_no_ingresadas:
             fila["diferencia"] = "No registrada localmente"
         diferencias_notas_debito = notas_locales_sin_banco + notas_debito_no_ingresadas
+        corte_historico = fecha_corte or estado_banco.get("fecha_fin")
+        fechas_cobro_guardadas = {
+            fila["Num_norm"]: _texto_celda(fila.get("Fecha_cobro", ""))
+            for _, fila in df_nuestro.iterrows()
+            if fila.get("Num_norm")
+        }
+        for cheque in cheques:
+            if cheque["resultado"] != "TRANSITO":
+                continue
+            fecha_cobro = fechas_cobro_guardadas.get(cheque["num"], "")
+            if fecha_cobro and corte_historico and fecha_cobro <= corte_historico:
+                cheque["resultado"] = "COBRADO_ANTERIOR"
+                cheque["fecha_cobro"] = fecha_cobro
+                cheque["mensaje"] = (
+                    f"Cheque {cheque['num']} ya estaba cobrado el {fecha_cobro}."
+                )
+
         cheques_cobrados = [
             cheque for cheque in cheques if cheque["resultado"] not in {"TRANSITO", "ANULADO"}
+            and cheque["resultado"] != "COBRADO_ANTERIOR"
         ]
-        # Un estado mensual no permite saber si un cheque histórico se cobró en
-        # un estado anterior. Mostrar todos como pendientes produciría miles de
-        # falsos tránsitos después de una importación histórica.
-        inicio_estado = estado_banco["fecha_inicio"]
-        numeros_emitidos_en_periodo = set(
-            df_nuestro.loc[
-                df_nuestro["Fecha_dt"].notna()
-                & (
-                    df_nuestro["Fecha_dt"] >= pd.Timestamp(inicio_estado)
-                    if inicio_estado
-                    else True
-                ),
-                "Num_norm",
-            ].dropna()
-        )
         cheques_transito = [
             cheque
             for cheque in cheques
             if cheque["resultado"] == "TRANSITO"
-            and cheque["num"] in numeros_emitidos_en_periodo
         ]
 
         def resumen(filas):

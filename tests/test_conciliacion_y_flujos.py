@@ -169,6 +169,30 @@ def test_conciliacion_incluye_pendientes_anteriores_y_excluye_cheques_futuros():
     assert resultado["fecha_corte"] == "2026-06-30"
 
 
+def test_conciliacion_guarda_fecha_cobro_y_respeta_un_corte_anterior():
+    main.guardar_cheque_en_archivo("7", "2026-05-20", "PROVEEDOR", "100")
+    with main.conectar_db() as conexion:
+        conexion.execute(
+            "UPDATE cheques SET fecha_cobro = '2026-09-11' WHERE numero = '7'"
+        )
+    crear_estado_bi(
+        "julio.csv", fin="31/07/2026",
+        filas=["10-07-2026,CQ,COMPENSACIÓN,7,100,,900.00"],
+    )
+
+    main.obtener_conciliacion(
+        archivo_banco="julio.csv", fecha_corte="2026-07-31"
+    )
+    assert main.cargar_cheques_registrados().iloc[0]["Fecha_cobro"] == "2026-07-10"
+
+    crear_estado_bi("junio.csv", filas=[])
+    junio = main.obtener_conciliacion(
+        archivo_banco="junio.csv", fecha_corte="2026-06-30"
+    )
+
+    assert [fila["num"] for fila in junio["cheques_transito"]] == ["7"]
+
+
 def test_conciliacion_lee_csv_banco_industrial_y_separa_otros_cargos():
     cuenta_id = main.crear_cuenta_bancaria(
         "BANCO INDUSTRIAL", "Monetaria", "048-000322-8"

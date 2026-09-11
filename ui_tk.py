@@ -1,7 +1,7 @@
 import tkinter as tk
 from calendar import monthrange
 from datetime import date
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from conciliador import operations as core
 from conciliador.runtime import prepare_application
@@ -158,7 +158,8 @@ class ConciliadorApp(tk.Tk):
             historial, self._cargar_cheques
         )
         self.tabla_cheques = self._tabla(
-            panel_tabla, ("Num", "Fecha", "Nombre", "Monto", "Estado")
+            panel_tabla,
+            ("Num", "Fecha", "Nombre", "Monto", "Estado", "Fecha cobro"),
         )
         acciones = ttk.Frame(historial)
         acciones.grid(row=2, column=0, sticky="ew", pady=(8, 0))
@@ -755,28 +756,69 @@ class ConciliadorApp(tk.Tk):
                 ("nombre", "Páguese a"),
                 ("descripcion", "Descripción"),
                 ("monto", "Monto"),
+                ("fecha_cobro", "Fecha de cobro (AAAA-MM-DD, opcional)"),
             ),
             cheque,
             lambda valores: self._actualizar_cheque(cheque["id"], valores),
         )
 
     def _actualizar_cheque(self, cheque_id, valores):
+        cheque = getattr(self, "cheques_por_id", {}).get(cheque_id, {})
+        contrasena_admin = None
+        fecha_cobro = valores.get("fecha_cobro", cheque.get("fecha_cobro", ""))
+        if fecha_cobro != cheque.get("fecha_cobro", ""):
+            contrasena_admin = self._pedir_contrasena_admin()
+            if contrasena_admin is None:
+                return False
         try:
-            resultado = service.actualizar_cheque(
-                cheque_id,
-                valores["numero"],
-                valores["fecha"],
-                valores["nombre"],
-                valores["monto"],
-                valores["descripcion"],
+            argumentos = (
+                cheque_id, valores["numero"], valores["fecha"],
+                valores["nombre"], valores["monto"], valores["descripcion"],
                 self.cuenta_id_actual(),
             )
+            if "fecha_cobro" in valores:
+                resultado = service.actualizar_cheque(
+                    *argumentos, fecha_cobro, contrasena_admin
+                )
+            else:
+                resultado = service.actualizar_cheque(*argumentos)
         except Exception as e:
             messagebox.showerror("No se pudo actualizar", str(e))
             return False
         self.refrescar_todo()
         messagebox.showinfo("Cheque actualizado", resultado["mensaje"])
         return True
+
+    def _pedir_contrasena_admin(self):
+        if not service.tiene_contrasena_admin():
+            nueva = simpledialog.askstring(
+                "Configurar acceso administrativo",
+                "Cree una contraseña administrativa de al menos 8 caracteres:",
+                show="*", parent=self,
+            )
+            if nueva is None:
+                return None
+            confirmacion = simpledialog.askstring(
+                "Configurar acceso administrativo",
+                "Repita la contraseña administrativa:",
+                show="*", parent=self,
+            )
+            if nueva != confirmacion:
+                messagebox.showerror(
+                    "Acceso administrativo", "Las contraseñas no coinciden."
+                )
+                return None
+            try:
+                service.establecer_contrasena_admin(nueva)
+            except Exception as e:
+                messagebox.showerror("Acceso administrativo", str(e))
+                return None
+            return nueva
+        return simpledialog.askstring(
+            "Acceso administrativo",
+            "Ingrese la contraseña administrativa para cambiar la fecha de cobro:",
+            show="*", parent=self,
+        )
 
     def editar_deposito(self):
         item = self._movimiento_seleccionado(
@@ -1280,12 +1322,16 @@ class ConciliadorApp(tk.Tk):
                 "nombre": fila["Nombre"],
                 "descripcion": fila["Descripcion"],
                 "monto": fila["Monto"],
+                "fecha_cobro": fila.get("Fecha_cobro", ""),
             }
             self.tabla_cheques.insert(
                 "",
                 tk.END,
                 iid=str(cheque_id),
-                values=(fila["Num"], fila["Fecha"], fila["Nombre"], fila["Monto"], fila["Estado"]),
+                values=(
+                    fila["Num"], fila["Fecha"], fila["Nombre"], fila["Monto"],
+                    fila["Estado"], fila.get("Fecha_cobro", ""),
+                ),
             )
         self._mostrar_estado_vacio(self.tabla_cheques, "No hay cheques registrados")
 

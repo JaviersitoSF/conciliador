@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -49,7 +50,41 @@ def test_base_nueva_migra_y_repetir_es_inocuo(tmp_path):
             )
         }
     assert version == LATEST_VERSION
-    assert {"cheques", "depositos", "auditoria", "formatos_impresion"} <= tables
+    assert {
+        "cheques", "depositos", "auditoria", "formatos_impresion",
+        "configuracion",
+    } <= tables
+    with database.connect() as connection:
+        columnas_cheque = {
+            row[1] for row in connection.execute("PRAGMA table_info(cheques)")
+        }
+    assert "fecha_cobro" in columnas_cheque
+
+
+def test_migracion_fecha_cobro_marca_cheques_existentes_no_anulados(tmp_path):
+    paths = AppPaths.portable(tmp_path)
+    database = Database(paths)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO cheques "
+            "(cuenta_id, numero, fecha, nombre, monto, estado) "
+            "VALUES (1, '1', '2026-01-01', 'A', '10', 'TRANSITO'), "
+            "(1, '2', '2026-01-01', 'B', '20', 'ANULADO')"
+        )
+        connection.execute("DELETE FROM schema_migrations WHERE version = 9")
+        connection.execute("ALTER TABLE cheques DROP COLUMN fecha_cobro")
+
+    assert database.initialize() == LATEST_VERSION
+    with database.connect() as connection:
+        fechas = [
+            tuple(row)
+            for row in connection.execute(
+                "SELECT numero, fecha_cobro FROM cheques ORDER BY numero"
+            ).fetchall()
+        ]
+
+    assert fechas == [("1", date.today().isoformat()), ("2", None)]
 
 
 def test_migracion_agrega_formato_de_conciliacion_a_cuentas_existentes(tmp_path):

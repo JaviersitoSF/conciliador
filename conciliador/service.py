@@ -32,6 +32,14 @@ class ConciliadorService:
     def actualizar_cheque(self, *args, **kwargs):
         return self.operations.actualizar_cheque(*args, **kwargs)
 
+    def tiene_contrasena_admin(self):
+        return self.operations.tiene_contrasena_admin()
+
+    def establecer_contrasena_admin(self, contrasena, contrasena_actual=None):
+        return self.operations.establecer_contrasena_admin(
+            contrasena, contrasena_actual
+        )
+
     def eliminar_cheque(self, cheque_id, cuenta_id=None):
         return self.operations.eliminar_cheque(cheque_id, cuenta_id)
 
