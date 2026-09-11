@@ -159,7 +159,10 @@ class ConciliadorApp(tk.Tk):
         )
         self.tabla_cheques = self._tabla(
             panel_tabla,
-            ("Num", "Fecha", "Nombre", "Monto", "Estado", "Fecha cobro"),
+            (
+                "Num", "Fecha", "Nombre", "Monto", "Estado", "Fecha cobro",
+                "Fecha anulación",
+            ),
         )
         acciones = ttk.Frame(historial)
         acciones.grid(row=2, column=0, sticky="ew", pady=(8, 0))
@@ -747,6 +750,17 @@ class ConciliadorApp(tk.Tk):
         if item is None:
             return
         cheque = self.cheques_por_id[ConciliadorApp._entero(item)]
+        if cheque.get("estado") == "ANULADO":
+            DialogoMovimiento(
+                self,
+                "Editar fecha de anulación",
+                (("fecha_anulacion", "Fecha de anulación (AAAA-MM-DD)"),),
+                cheque,
+                lambda valores: self._actualizar_fecha_anulacion(
+                    cheque["id"], valores["fecha_anulacion"]
+                ),
+            )
+            return
         DialogoMovimiento(
             self,
             "Editar cheque",
@@ -789,6 +803,22 @@ class ConciliadorApp(tk.Tk):
         messagebox.showinfo("Cheque actualizado", resultado["mensaje"])
         return True
 
+    def _actualizar_fecha_anulacion(self, cheque_id, fecha_anulacion):
+        contrasena_admin = self._pedir_contrasena_admin()
+        if contrasena_admin is None:
+            return False
+        try:
+            resultado = service.actualizar_fecha_anulacion(
+                cheque_id, fecha_anulacion, contrasena_admin,
+                self.cuenta_id_actual(),
+            )
+        except Exception as e:
+            messagebox.showerror("No se pudo actualizar", str(e))
+            return False
+        self.refrescar_todo()
+        messagebox.showinfo("Cheque actualizado", resultado["mensaje"])
+        return True
+
     def _pedir_contrasena_admin(self):
         if not service.tiene_contrasena_admin():
             nueva = simpledialog.askstring(
@@ -816,7 +846,7 @@ class ConciliadorApp(tk.Tk):
             return nueva
         return simpledialog.askstring(
             "Acceso administrativo",
-            "Ingrese la contraseña administrativa para cambiar la fecha de cobro:",
+            "Ingrese la contraseña administrativa para cambiar esta fecha:",
             show="*", parent=self,
         )
 
@@ -1322,7 +1352,9 @@ class ConciliadorApp(tk.Tk):
                 "nombre": fila["Nombre"],
                 "descripcion": fila["Descripcion"],
                 "monto": fila["Monto"],
+                "estado": fila["Estado"],
                 "fecha_cobro": fila.get("Fecha_cobro", ""),
+                "fecha_anulacion": fila.get("Fecha_anulacion", ""),
             }
             self.tabla_cheques.insert(
                 "",
@@ -1331,6 +1363,7 @@ class ConciliadorApp(tk.Tk):
                 values=(
                     fila["Num"], fila["Fecha"], fila["Nombre"], fila["Monto"],
                     fila["Estado"], fila.get("Fecha_cobro", ""),
+                    fila.get("Fecha_anulacion", ""),
                 ),
             )
         self._mostrar_estado_vacio(self.tabla_cheques, "No hay cheques registrados")

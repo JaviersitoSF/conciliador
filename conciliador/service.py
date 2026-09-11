@@ -32,6 +32,9 @@ class ConciliadorService:
     def actualizar_cheque(self, *args, **kwargs):
         return self.operations.actualizar_cheque(*args, **kwargs)
 
+    def actualizar_fecha_anulacion(self, *args, **kwargs):
+        return self.operations.actualizar_fecha_anulacion(*args, **kwargs)
+
     def tiene_contrasena_admin(self):
         return self.operations.tiene_contrasena_admin()
 

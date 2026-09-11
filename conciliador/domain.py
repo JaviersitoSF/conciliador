@@ -28,6 +28,10 @@ class Cheque:
     monto: Decimal
     estado: str = "TRANSITO"
     descripcion: str = ""
+    fecha_cobro: str | None = None
+    fecha_cobro_origen: str | None = None
+    fecha_anulacion: str | None = None
+    fecha_anulacion_origen: str | None = None
 
 
 @dataclass(frozen=True)

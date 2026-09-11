@@ -75,6 +75,9 @@ def inicializar_db():
                 fecha_cobro TEXT,
                 fecha_cobro_origen TEXT
                     CHECK (fecha_cobro_origen IN ('MIGRACION', 'BANCO', 'ADMIN')),
+                fecha_anulacion TEXT,
+                fecha_anulacion_origen TEXT
+                    CHECK (fecha_anulacion_origen IN ('MIGRACION', 'OPERACION', 'ADMIN')),
                 creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (cuenta_id, numero),
@@ -176,6 +179,18 @@ def inicializar_db():
             conexion.execute(
                 "UPDATE cheques SET fecha_cobro_origen = 'MIGRACION' "
                 "WHERE fecha_cobro IS NOT NULL"
+            )
+        if "fecha_anulacion" not in columnas_cheque:
+            conexion.execute("ALTER TABLE cheques ADD COLUMN fecha_anulacion TEXT")
+        if "fecha_anulacion_origen" not in columnas_cheque:
+            conexion.execute(
+                "ALTER TABLE cheques ADD COLUMN fecha_anulacion_origen TEXT "
+                "CHECK (fecha_anulacion_origen IN ('MIGRACION', 'OPERACION', 'ADMIN'))"
+            )
+            conexion.execute(
+                "UPDATE cheques SET fecha_anulacion = date('now', 'localtime'), "
+                "fecha_anulacion_origen = 'MIGRACION' "
+                "WHERE estado = 'ANULADO' AND fecha_anulacion IS NULL"
             )
         conexion.execute(
             """

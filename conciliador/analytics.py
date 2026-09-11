@@ -879,6 +879,8 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
 
         cheques = []
         fechas_cobro_detectadas = []
+        corte_historico = fecha_corte or estado_banco.get("fecha_fin")
+        inicio_estado = estado_banco.get("fecha_inicio")
         for _, fila in df_nuestro.iterrows():
             num = fila["Num_norm"]
             if not num:
@@ -890,6 +892,10 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             origen_fecha_cobro = _texto_celda(
                 fila.get("Origen_fecha_cobro", "")
             )
+            fecha_anulacion = _texto_celda(fila.get("Fecha_anulacion", ""))
+            origen_fecha_anulacion = _texto_celda(
+                fila.get("Origen_fecha_anulacion", "")
+            )
             fecha_cobro_banco = (
                 _fecha_bancaria(cobrado.iloc[0].get("fecha"))
                 if len(cobrado) == 1
@@ -898,7 +904,46 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             if fecha_cobro_banco:
                 fechas_cobro_detectadas.append((num, fecha_cobro_banco))
 
-            if estado == "ANULADO":
+            anulacion_confirmada = (
+                origen_fecha_anulacion in {"OPERACION", "ADMIN"}
+                and fecha_anulacion
+            )
+            anulado_al_corte = (
+                estado == "ANULADO"
+                and (
+                    not corte_historico
+                    or (
+                        anulacion_confirmada
+                        and fecha_anulacion <= corte_historico
+                    )
+                    or (
+                        not anulacion_confirmada
+                        and (
+                            not cobrado.empty
+                            or not inicio_estado
+                            or fila["Fecha_dt"] >= pd.Timestamp(inicio_estado)
+                        )
+                    )
+                )
+            )
+            if (
+                estado == "ANULADO"
+                and not anulacion_confirmada
+                and cobrado.empty
+                and inicio_estado
+                and fila["Fecha_dt"] < pd.Timestamp(inicio_estado)
+            ):
+                cheques.append(
+                    {
+                        "num": num, "estado": estado,
+                        "resultado": "FUERA_PERIODO",
+                        "monto_nuestro": fila["Monto_valor"],
+                        "mensaje": "Anulación histórica sin fecha confirmada.",
+                    }
+                )
+                continue
+
+            if anulado_al_corte:
                 if cobrado.empty:
                     mensaje = f"🚫 Cheque {num} está ANULADO y no aparece cobrado en el banco."
                     resultado = "ANULADO"
@@ -1171,7 +1216,6 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
         for fila in notas_debito_no_ingresadas:
             fila["diferencia"] = "No registrada localmente"
         diferencias_notas_debito = notas_locales_sin_banco + notas_debito_no_ingresadas
-        corte_historico = fecha_corte or estado_banco.get("fecha_fin")
         datos_historicos_cheques = {
             fila["Num_norm"]: {
                 "fecha_cobro": _texto_celda(fila.get("Fecha_cobro", "")),
@@ -1183,7 +1227,6 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             for _, fila in df_nuestro.iterrows()
             if fila.get("Num_norm")
         }
-        inicio_estado = estado_banco.get("fecha_inicio")
         for cheque in cheques:
             if cheque["resultado"] != "TRANSITO":
                 continue

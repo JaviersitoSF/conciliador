@@ -13,6 +13,7 @@ from .storage import (conectar_db, crear_respaldo_posterior, inicializar_db,
 COLUMNAS_CHEQUES = [
     "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Nombre",
     "Monto", "Estado", "Fecha_cobro", "Origen_fecha_cobro", "Descripcion",
+    "Fecha_anulacion", "Origen_fecha_anulacion",
 ]
 COLUMNAS_MOVIMIENTOS = [
     "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion",
@@ -77,6 +78,8 @@ def cargar_cheques_registrados(cuenta_id=None, busqueda=None):
                    c.nombre AS Nombre, c.monto AS Monto, c.estado AS Estado,
                    COALESCE(c.fecha_cobro, '') AS Fecha_cobro,
                    COALESCE(c.fecha_cobro_origen, '') AS Origen_fecha_cobro,
+                   COALESCE(c.fecha_anulacion, '') AS Fecha_anulacion,
+                   COALESCE(c.fecha_anulacion_origen, '') AS Origen_fecha_anulacion,
                    c.descripcion AS Descripcion
             FROM cheques c
             JOIN cuentas_bancarias cb ON cb.id = c.cuenta_id
@@ -88,7 +91,8 @@ def cargar_cheques_registrados(cuenta_id=None, busqueda=None):
             parametros.append(obtener_cuenta(cuenta_id)["id"])
         if patron is not None:
             columnas_busqueda = (
-                "c.numero", "c.fecha", "c.fecha_cobro", "c.nombre", "c.descripcion",
+                "c.numero", "c.fecha", "c.fecha_cobro", "c.fecha_anulacion",
+                "c.nombre", "c.descripcion",
                 "c.monto", "c.estado",
             )
             condiciones.append(_condicion_busqueda(columnas_busqueda))
@@ -686,6 +690,50 @@ def registrar_fechas_cobro(cuenta_id, fechas_por_numero):
 def registrar_fecha_cobro(cuenta_id, numero, fecha_cobro):
     return bool(registrar_fechas_cobro(cuenta_id, [(numero, fecha_cobro)]))
 
+
+def actualizar_fecha_anulacion(
+    cheque_id, fecha_anulacion, contrasena_admin, cuenta_id=None
+):
+    cuenta = obtener_cuenta(cuenta_id)
+    try:
+        cheque_id = int(cheque_id)
+    except (TypeError, ValueError) as e:
+        raise ErrorOperacion("Cheque inválido.") from e
+    fecha_anulacion = normalizar_fecha(fecha_anulacion)
+    with transaccion() as conexion:
+        cheque = conexion.execute(
+            "SELECT numero, fecha, estado FROM cheques "
+            "WHERE id = ? AND cuenta_id = ?",
+            (cheque_id, cuenta["id"]),
+        ).fetchone()
+        if cheque is None:
+            raise ErrorOperacion("El cheque no existe en esta cuenta.")
+        if cheque["estado"] != "ANULADO":
+            raise ErrorOperacion("Solo los cheques anulados tienen fecha de anulación.")
+        if fecha_anulacion < cheque["fecha"]:
+            raise ErrorOperacion(
+                "La fecha de anulación no puede ser anterior a la emisión."
+            )
+        from .storage import verificar_contrasena_admin
+        if not verificar_contrasena_admin(contrasena_admin, conexion):
+            raise ErrorOperacion("Contraseña administrativa incorrecta.")
+        conexion.execute(
+            "UPDATE cheques SET fecha_anulacion = ?, "
+            "fecha_anulacion_origen = 'ADMIN', "
+            "actualizado_en = CURRENT_TIMESTAMP WHERE id = ?",
+            (fecha_anulacion, cheque_id),
+        )
+        registrar_auditoria(
+            conexion, "ACTUALIZAR_ANULACION", "CHEQUE", cheque_id,
+            f"{cuenta['banco']} / {cuenta['nombre']}: cheque {cheque['numero']}; "
+            f"fecha de anulación: {fecha_anulacion}",
+        )
+    crear_respaldo_posterior()
+    return {
+        "id": cheque_id,
+        "mensaje": f"Fecha de anulación del cheque {cheque['numero']} actualizada.",
+    }
+
 def eliminar_cheque(cheque_id, cuenta_id=None):
     cuenta = obtener_cuenta(cuenta_id)
     try:
@@ -887,7 +935,9 @@ def anular_cheque_numero(num_anular, cuenta_id=None):
         conexion.execute(
             """
             UPDATE cheques
-            SET estado = 'ANULADO', actualizado_en = CURRENT_TIMESTAMP
+            SET estado = 'ANULADO', fecha_anulacion = date('now', 'localtime'),
+                fecha_anulacion_origen = 'OPERACION',
+                actualizado_en = CURRENT_TIMESTAMP
             WHERE cuenta_id = ? AND numero = ?
             """,
             (cuenta["id"], num_anular),

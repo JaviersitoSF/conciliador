@@ -78,6 +78,28 @@ def test_edicion_ordinaria_conserva_fecha_y_origen_de_cobro():
     assert cheque["Origen_fecha_cobro"] == "BANCO"
 
 
+def test_anular_guarda_fecha_y_correccion_exige_clave_admin():
+    main.guardar_cheque_en_archivo("20", "2026-06-01", "A", "10")
+    main.anular_cheque_numero("20")
+    cheque = main.cargar_cheques_registrados().iloc[0]
+
+    assert cheque["Fecha_anulacion"] == date.today().isoformat()
+    assert cheque["Origen_fecha_anulacion"] == "OPERACION"
+
+    main.establecer_contrasena_admin("muevelo-muevelo")
+    with pytest.raises(main.ErrorOperacion, match="incorrecta"):
+        main.actualizar_fecha_anulacion(
+            int(cheque["Id"]), "2026-06-10", "mala", cuenta_id=1
+        )
+    main.actualizar_fecha_anulacion(
+        int(cheque["Id"]), "2026-06-10", "muevelo-muevelo", cuenta_id=1
+    )
+
+    corregido = main.cargar_cheques_registrados().iloc[0]
+    assert corregido["Fecha_anulacion"] == "2026-06-10"
+    assert corregido["Origen_fecha_anulacion"] == "ADMIN"
+
+
 @pytest.mark.parametrize(
     "fecha",
     ["2026/06/01", "01-06-2026", "2026-02-30", "2026-6-1", "", "no-fecha"],

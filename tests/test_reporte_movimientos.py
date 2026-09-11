@@ -192,6 +192,11 @@ class SistemaBancarioTests(unittest.TestCase):
         main.guardar_cheque_en_archivo("3", "2026-06-03", "TRANSITO", "100.00")
         main.guardar_cheque_en_archivo("4", "2026-06-03", "ANULADO", "100.00")
         main.anular_cheque_numero("4")
+        with main.conectar_db() as conexion:
+            conexion.execute(
+                "UPDATE cheques SET fecha_anulacion = '2026-06-04' "
+                "WHERE numero = '4'"
+            )
         crear_estado_bi(
             "estado.csv",
             [

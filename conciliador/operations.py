@@ -5,6 +5,7 @@ from .domain import convertir_monto, normalizar_fecha, normalizar_numero_cheque
 from .errors import ErrorOperacion
 from .movements import (
     actualizar_cheque,
+    actualizar_fecha_anulacion,
     actualizar_deposito,
     actualizar_nota_debito,
     anular_cheque_numero,

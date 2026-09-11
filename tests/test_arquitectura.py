@@ -58,7 +58,10 @@ def test_base_nueva_migra_y_repetir_es_inocuo(tmp_path):
         columnas_cheque = {
             row[1] for row in connection.execute("PRAGMA table_info(cheques)")
         }
-    assert {"fecha_cobro", "fecha_cobro_origen"} <= columnas_cheque
+    assert {
+        "fecha_cobro", "fecha_cobro_origen", "fecha_anulacion",
+        "fecha_anulacion_origen",
+    } <= columnas_cheque
 
 
 def test_migracion_fecha_cobro_marca_cheques_existentes_no_anulados(tmp_path):
@@ -128,6 +131,57 @@ def test_migracion_recupera_origen_de_fechas_desde_auditoria(tmp_path):
     assert origenes == [
         ("10", "BANCO"), ("11", "ADMIN"), ("12", "MIGRACION")
     ]
+
+
+def test_migracion_fecha_anulacion_marca_anulados_existentes(tmp_path):
+    paths = AppPaths.portable(tmp_path)
+    database = Database(paths)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO cheques "
+            "(cuenta_id, numero, fecha, nombre, monto, estado) "
+            "VALUES (1, '30', '2026-01-01', 'A', '10', 'ANULADO')"
+        )
+        connection.execute("DELETE FROM schema_migrations WHERE version = 11")
+
+    assert database.initialize() == LATEST_VERSION
+    with database.connect() as connection:
+        cheque = connection.execute(
+            "SELECT fecha_anulacion, fecha_anulacion_origen FROM cheques "
+            "WHERE numero = '30'"
+        ).fetchone()
+
+    assert tuple(cheque) == (date.today().isoformat(), "MIGRACION")
+
+
+def test_migracion_recupera_fecha_anulacion_desde_auditoria(tmp_path):
+    paths = AppPaths.portable(tmp_path)
+    database = Database(paths)
+    database.initialize()
+    with database.connect() as connection:
+        connection.execute(
+            "INSERT INTO cheques (cuenta_id, numero, fecha, nombre, monto, estado, "
+            "fecha_anulacion, fecha_anulacion_origen) "
+            "VALUES (1, '40', '2026-07-31', 'A', '10', 'ANULADO', "
+            "'2026-09-11', 'MIGRACION')"
+        )
+        connection.execute(
+            "INSERT INTO auditoria "
+            "(fecha_hora, accion, entidad, entidad_id, detalle) VALUES "
+            "('2026-09-03 17:12:09', 'ANULAR', 'CHEQUE', '40', "
+            "'Estado cambiado a ANULADO.')"
+        )
+        connection.execute("DELETE FROM schema_migrations WHERE version = 12")
+
+    assert database.initialize() == LATEST_VERSION
+    with database.connect() as connection:
+        cheque = connection.execute(
+            "SELECT fecha_anulacion, fecha_anulacion_origen FROM cheques "
+            "WHERE numero = '40'"
+        ).fetchone()
+
+    assert tuple(cheque) == ("2026-09-03", "OPERACION")
 
 
 def test_migracion_agrega_formato_de_conciliacion_a_cuentas_existentes(tmp_path):

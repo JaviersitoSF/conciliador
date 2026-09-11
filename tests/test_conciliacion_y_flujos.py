@@ -84,6 +84,11 @@ def test_conciliacion_envuelve_errores_de_lectura():
 def test_conciliacion_distingue_anulado_no_cobrado_y_monto_invalido():
     main.guardar_cheque_en_archivo("1", "2026-06-01", "ANULADO", "10")
     main.anular_cheque_numero("1")
+    with main.conectar_db() as conexion:
+        conexion.execute(
+            "UPDATE cheques SET fecha_anulacion = '2026-06-02' "
+            "WHERE numero = '1'"
+        )
     main.guardar_cheque_en_archivo("2", "2026-06-01", "INVALIDO", "20")
     crear_estado_bi(
         "estado.csv",
@@ -215,6 +220,18 @@ def test_conciliacion_excluye_historicos_con_fecha_provisional():
     assert [fila["num"] for fila in resultado["cheques_transito"]] == ["21", "22"]
     estados = {fila["num"]: fila["resultado"] for fila in resultado["cheques"]}
     assert estados["20"] == "FUERA_PERIODO"
+
+
+def test_anulacion_posterior_al_corte_deja_el_cheque_en_transito():
+    main.guardar_cheque_en_archivo("23", "2026-06-15", "PROVEEDOR", "100")
+    main.anular_cheque_numero("23")
+    crear_estado_bi("junio.csv", filas=[])
+
+    resultado = main.obtener_conciliacion(
+        archivo_banco="junio.csv", fecha_corte="2026-06-30"
+    )
+
+    assert [fila["num"] for fila in resultado["cheques_transito"]] == ["23"]
 
 
 def test_conciliacion_lee_csv_banco_industrial_y_separa_otros_cargos():

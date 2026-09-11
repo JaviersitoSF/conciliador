@@ -65,6 +65,9 @@ CREATE TABLE cheques (
     fecha_cobro TEXT,
     fecha_cobro_origen TEXT
         CHECK (fecha_cobro_origen IN ('MIGRACION', 'BANCO', 'ADMIN')),
+    fecha_anulacion TEXT,
+    fecha_anulacion_origen TEXT
+        CHECK (fecha_anulacion_origen IN ('MIGRACION', 'OPERACION', 'ADMIN')),
     creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (cuenta_id, numero),
@@ -352,6 +355,64 @@ def _upgrade_10(connection):
         )
 
 
+def _upgrade_11(connection):
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(cheques)")
+    }
+    if "fecha_anulacion" not in columns:
+        connection.execute("ALTER TABLE cheques ADD COLUMN fecha_anulacion TEXT")
+    if "fecha_anulacion_origen" not in columns:
+        connection.execute(
+            "ALTER TABLE cheques ADD COLUMN fecha_anulacion_origen TEXT "
+            "CHECK (fecha_anulacion_origen IN ('MIGRACION', 'OPERACION', 'ADMIN'))"
+        )
+    connection.execute(
+        "UPDATE cheques SET fecha_anulacion = date('now', 'localtime'), "
+        "fecha_anulacion_origen = 'MIGRACION' "
+        "WHERE estado = 'ANULADO' AND fecha_anulacion IS NULL"
+    )
+
+
+def _upgrade_12(connection):
+    """Recupera anulaciones reales que la migración 11 marcó provisionales."""
+    cheques = connection.execute(
+        "SELECT c.id, c.numero, cb.banco, cb.nombre AS cuenta, "
+        "(SELECT COUNT(*) FROM cheques iguales WHERE iguales.numero = c.numero) "
+        "AS coincidencias "
+        "FROM cheques c JOIN cuentas_bancarias cb ON cb.id = c.cuenta_id "
+        "WHERE c.estado = 'ANULADO' "
+        "AND c.fecha_anulacion_origen = 'MIGRACION'"
+    ).fetchall()
+    for cheque in cheques:
+        anulaciones = connection.execute(
+            "SELECT id, date(fecha_hora, 'localtime') AS fecha "
+            "FROM auditoria WHERE entidad = 'CHEQUE' AND accion = 'ANULAR' "
+            "AND entidad_id = ? ORDER BY id DESC",
+            (cheque["numero"],),
+        ).fetchall()
+        fecha_recuperada = None
+        for anulacion in anulaciones:
+            if cheque["coincidencias"] == 1:
+                fecha_recuperada = anulacion["fecha"]
+                break
+            creacion = connection.execute(
+                "SELECT detalle FROM auditoria WHERE entidad = 'CHEQUE' "
+                "AND accion = 'CREAR' AND entidad_id = ? AND id < ? "
+                "ORDER BY id DESC LIMIT 1",
+                (cheque["numero"], anulacion["id"]),
+            ).fetchone()
+            prefijo = f"{cheque['banco']} / {cheque['cuenta']}: cheque "
+            if creacion and creacion["detalle"].startswith(prefijo):
+                fecha_recuperada = anulacion["fecha"]
+                break
+        if fecha_recuperada:
+            connection.execute(
+                "UPDATE cheques SET fecha_anulacion = ?, "
+                "fecha_anulacion_origen = 'OPERACION' WHERE id = ?",
+                (fecha_recuperada, cheque["id"]),
+            )
+
+
 MIGRATIONS = (
     Migration(1, "esquema_inicial", _upgrade_1),
     Migration(2, "numero_deposito", _upgrade_2),
@@ -363,6 +424,8 @@ MIGRATIONS = (
     Migration(8, "moneda_cuenta", _upgrade_8),
     Migration(9, "fecha_cobro_y_acceso_admin", _upgrade_9),
     Migration(10, "origen_fecha_cobro", _upgrade_10),
+    Migration(11, "fecha_anulacion", _upgrade_11),
+    Migration(12, "recuperar_fechas_anulacion", _upgrade_12),
 )
 LATEST_VERSION = MIGRATIONS[-1].version
 
