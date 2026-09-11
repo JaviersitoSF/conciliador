@@ -12,12 +12,13 @@ from .storage import (conectar_db, crear_respaldo_posterior, inicializar_db,
 
 COLUMNAS_CHEQUES = [
     "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Nombre",
-    "Monto", "Estado", "Fecha_cobro", "Descripcion",
+    "Monto", "Estado", "Fecha_cobro", "Origen_fecha_cobro", "Descripcion",
 ]
 COLUMNAS_MOVIMIENTOS = [
     "Id", "Cuenta_id", "Banco", "Cuenta", "Num", "Fecha", "Descripcion",
     "Monto", "Estado",
 ]
+_FECHA_COBRO_SIN_CAMBIO = object()
 
 def formatear_monto(valor):
     monto = convertir_monto(valor)
@@ -75,6 +76,7 @@ def cargar_cheques_registrados(cuenta_id=None, busqueda=None):
                    cb.nombre AS Cuenta, c.numero AS Num, c.fecha AS Fecha,
                    c.nombre AS Nombre, c.monto AS Monto, c.estado AS Estado,
                    COALESCE(c.fecha_cobro, '') AS Fecha_cobro,
+                   COALESCE(c.fecha_cobro_origen, '') AS Origen_fecha_cobro,
                    c.descripcion AS Descripcion
             FROM cheques c
             JOIN cuentas_bancarias cb ON cb.id = c.cuenta_id
@@ -565,7 +567,7 @@ def guardar_cheque_en_archivo(num, fecha, nombre, monto, descripcion="", cuenta_
 
 def actualizar_cheque(
     cheque_id, numero, fecha, nombre, monto, descripcion="", cuenta_id=None,
-    fecha_cobro=None, contrasena_admin=None,
+    fecha_cobro=_FECHA_COBRO_SIN_CAMBIO, contrasena_admin=None,
 ):
     cuenta = obtener_cuenta(cuenta_id)
     try:
@@ -586,8 +588,10 @@ def actualizar_cheque(
         raise ErrorOperacion("⚠️ Error: El monto debe ser mayor que cero.")
     nombre = nombre.upper()
     descripcion = str(descripcion or "").strip().upper()
-    fecha_cobro = str(fecha_cobro or "").strip()
-    if fecha_cobro:
+    fecha_cobro_suministrada = fecha_cobro is not _FECHA_COBRO_SIN_CAMBIO
+    if fecha_cobro_suministrada:
+        fecha_cobro = str(fecha_cobro or "").strip()
+    if fecha_cobro_suministrada and fecha_cobro:
         fecha_cobro = normalizar_fecha(fecha_cobro)
         if fecha_cobro < fecha:
             raise ErrorOperacion(
@@ -598,7 +602,9 @@ def actualizar_cheque(
         with transaccion() as conexion:
             cheque = conexion.execute(
                 """
-                SELECT estado, COALESCE(fecha_cobro, '') AS fecha_cobro FROM cheques
+                SELECT estado, COALESCE(fecha_cobro, '') AS fecha_cobro,
+                       fecha_cobro_origen
+                FROM cheques
                 WHERE id = ? AND cuenta_id = ?
                 """,
                 (cheque_id, cuenta["id"]),
@@ -607,21 +613,28 @@ def actualizar_cheque(
                 raise ErrorOperacion("⚠️ El cheque no existe en esta cuenta.")
             if cheque["estado"] == "ANULADO":
                 raise ErrorOperacion("⚠️ Un cheque anulado no se puede editar.")
-            if fecha_cobro != cheque["fecha_cobro"]:
+            if not fecha_cobro_suministrada:
+                fecha_cobro = cheque["fecha_cobro"]
+            cambio_fecha_cobro = fecha_cobro != cheque["fecha_cobro"]
+            if cambio_fecha_cobro:
                 from .storage import verificar_contrasena_admin
                 if not verificar_contrasena_admin(contrasena_admin, conexion):
                     raise ErrorOperacion("Contraseña administrativa incorrecta.")
+            origen_fecha_cobro = (
+                "ADMIN" if fecha_cobro else None
+            ) if cambio_fecha_cobro else cheque["fecha_cobro_origen"]
             conexion.execute(
                 """
                 UPDATE cheques
                 SET numero = ?, fecha = ?, nombre = ?, monto = ?,
                     descripcion = ?, fecha_cobro = NULLIF(?, ''),
+                    fecha_cobro_origen = ?,
                     actualizado_en = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (
                     numero, fecha, nombre, formatear_monto(monto),
-                    descripcion, fecha_cobro, cheque_id,
+                    descripcion, fecha_cobro, origen_fecha_cobro, cheque_id,
                 ),
             )
             registrar_auditoria(
@@ -652,9 +665,11 @@ def registrar_fechas_cobro(cuenta_id, fechas_por_numero):
     with transaccion() as conexion:
         for numero, fecha_cobro in fechas:
             cursor = conexion.execute(
-                "UPDATE cheques SET fecha_cobro = ?, actualizado_en = CURRENT_TIMESTAMP "
+                "UPDATE cheques SET fecha_cobro = ?, fecha_cobro_origen = 'BANCO', "
+                "actualizado_en = CURRENT_TIMESTAMP "
                 "WHERE cuenta_id = ? AND numero = ? "
-                "AND COALESCE(fecha_cobro, '') != ?",
+                "AND (COALESCE(fecha_cobro, '') != ? "
+                "OR COALESCE(fecha_cobro_origen, '') != 'BANCO')",
                 (fecha_cobro, cuenta["id"], numero, fecha_cobro),
             )
             if cursor.rowcount:

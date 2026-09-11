@@ -63,6 +63,8 @@ CREATE TABLE cheques (
         CHECK (estado IN ('TRANSITO', 'ANULADO')),
     descripcion TEXT NOT NULL DEFAULT '',
     fecha_cobro TEXT,
+    fecha_cobro_origen TEXT
+        CHECK (fecha_cobro_origen IN ('MIGRACION', 'BANCO', 'ADMIN')),
     creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (cuenta_id, numero),
@@ -308,6 +310,48 @@ def _upgrade_9(connection):
     )
 
 
+def _upgrade_10(connection):
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(cheques)")
+    }
+    if "fecha_cobro_origen" not in columns:
+        connection.execute(
+            "ALTER TABLE cheques ADD COLUMN fecha_cobro_origen TEXT "
+            "CHECK (fecha_cobro_origen IN ('MIGRACION', 'BANCO', 'ADMIN'))"
+        )
+    migracion_9 = connection.execute(
+        "SELECT date(applied_at, 'localtime') AS fecha "
+        "FROM schema_migrations WHERE version = 9"
+    ).fetchone()
+    fecha_migracion = migracion_9["fecha"] if migracion_9 else None
+    cheques = connection.execute(
+        "SELECT c.id, c.cuenta_id, c.numero, c.fecha_cobro, "
+        "cb.banco, cb.nombre AS cuenta "
+        "FROM cheques c JOIN cuentas_bancarias cb ON cb.id = c.cuenta_id "
+        "WHERE c.fecha_cobro IS NOT NULL"
+    ).fetchall()
+    for cheque in cheques:
+        detalle_banco = (
+            f"{cheque['banco']} / {cheque['cuenta']}: "
+            f"cobrado el {cheque['fecha_cobro']}"
+        )
+        evento_banco = connection.execute(
+            "SELECT 1 FROM auditoria WHERE entidad = 'CHEQUE' "
+            "AND accion = 'COBRAR' AND entidad_id = ? AND detalle = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (cheque["numero"], detalle_banco),
+        ).fetchone()
+        origen = (
+            "BANCO" if evento_banco
+            else "MIGRACION" if cheque["fecha_cobro"] == fecha_migracion
+            else "ADMIN"
+        )
+        connection.execute(
+            "UPDATE cheques SET fecha_cobro_origen = ? WHERE id = ?",
+            (origen, cheque["id"]),
+        )
+
+
 MIGRATIONS = (
     Migration(1, "esquema_inicial", _upgrade_1),
     Migration(2, "numero_deposito", _upgrade_2),
@@ -318,6 +362,7 @@ MIGRATIONS = (
     Migration(7, "formato_conciliacion_bac", _upgrade_7),
     Migration(8, "moneda_cuenta", _upgrade_8),
     Migration(9, "fecha_cobro_y_acceso_admin", _upgrade_9),
+    Migration(10, "origen_fecha_cobro", _upgrade_10),
 )
 LATEST_VERSION = MIGRATIONS[-1].version
 

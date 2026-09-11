@@ -59,6 +59,25 @@ def test_fecha_cobro_solo_se_edita_con_contrasena_admin():
     assert "muevelo-muevelo" not in valor
 
 
+def test_edicion_ordinaria_conserva_fecha_y_origen_de_cobro():
+    main.guardar_cheque_en_archivo("19", "2026-06-01", "A", "10")
+    cheque_id = int(main.cargar_cheques_registrados().iloc[0]["Id"])
+    with main.conectar_db() as conexion:
+        conexion.execute(
+            "UPDATE cheques SET fecha_cobro = '2026-06-10', "
+            "fecha_cobro_origen = 'BANCO' WHERE id = ?",
+            (cheque_id,),
+        )
+
+    main.actualizar_cheque(
+        cheque_id, "19", "2026-06-01", "NUEVO NOMBRE", "10", cuenta_id=1
+    )
+
+    cheque = main.cargar_cheques_registrados().iloc[0]
+    assert cheque["Fecha_cobro"] == "2026-06-10"
+    assert cheque["Origen_fecha_cobro"] == "BANCO"
+
+
 @pytest.mark.parametrize(
     "fecha",
     ["2026/06/01", "01-06-2026", "2026-02-30", "2026-6-1", "", "no-fecha"],

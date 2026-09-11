@@ -58,7 +58,7 @@ def test_base_nueva_migra_y_repetir_es_inocuo(tmp_path):
         columnas_cheque = {
             row[1] for row in connection.execute("PRAGMA table_info(cheques)")
         }
-    assert "fecha_cobro" in columnas_cheque
+    assert {"fecha_cobro", "fecha_cobro_origen"} <= columnas_cheque
 
 
 def test_migracion_fecha_cobro_marca_cheques_existentes_no_anulados(tmp_path):
@@ -85,6 +85,49 @@ def test_migracion_fecha_cobro_marca_cheques_existentes_no_anulados(tmp_path):
         ]
 
     assert fechas == [("1", date.today().isoformat()), ("2", None)]
+
+
+def test_migracion_recupera_origen_de_fechas_desde_auditoria(tmp_path):
+    paths = AppPaths.portable(tmp_path)
+    database = Database(paths)
+    database.initialize()
+    with database.connect() as connection:
+        banco = connection.execute(
+            "INSERT INTO cheques "
+            "(cuenta_id, numero, fecha, nombre, monto, fecha_cobro) "
+            "VALUES (1, '10', '2026-01-01', 'A', '10', '2026-07-10')"
+        ).lastrowid
+        admin = connection.execute(
+            "INSERT INTO cheques "
+            "(cuenta_id, numero, fecha, nombre, monto, fecha_cobro) "
+            "VALUES (1, '11', '2026-01-01', 'B', '10', '2026-07-11')"
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO cheques "
+            "(cuenta_id, numero, fecha, nombre, monto, fecha_cobro) "
+            "VALUES (1, '12', '2026-01-01', 'C', '10', '2026-09-11')"
+        )
+        connection.execute(
+            "INSERT INTO auditoria (accion, entidad, entidad_id, detalle) "
+            "VALUES ('COBRAR', 'CHEQUE', '10', "
+            "'SIN CONFIGURAR / Cuenta principal: cobrado el 2026-07-10')"
+        )
+        connection.execute("UPDATE cheques SET fecha_cobro_origen = NULL")
+        connection.execute("DELETE FROM schema_migrations WHERE version = 10")
+
+    assert database.initialize() == LATEST_VERSION
+    with database.connect() as connection:
+        origenes = [
+            tuple(row)
+            for row in connection.execute(
+                "SELECT numero, fecha_cobro_origen FROM cheques ORDER BY numero"
+            )
+        ]
+
+    assert banco and admin
+    assert origenes == [
+        ("10", "BANCO"), ("11", "ADMIN"), ("12", "MIGRACION")
+    ]
 
 
 def test_migracion_agrega_formato_de_conciliacion_a_cuentas_existentes(tmp_path):

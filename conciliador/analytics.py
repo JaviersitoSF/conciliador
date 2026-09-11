@@ -887,6 +887,9 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             cobrado = df_banco[df_banco["Num_norm"] == num]
             estado = str(fila.get("Estado", "")).upper()
             fecha_cobro_guardada = _texto_celda(fila.get("Fecha_cobro", ""))
+            origen_fecha_cobro = _texto_celda(
+                fila.get("Origen_fecha_cobro", "")
+            )
             fecha_cobro_banco = (
                 _fecha_bancaria(cobrado.iloc[0].get("fecha"))
                 if len(cobrado) == 1
@@ -969,6 +972,9 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                     "monto_nuestro": monto_nuestro,
                     "monto_banco": monto_banco,
                     "fecha_cobro": fecha_cobro_guardada or fecha_cobro_banco or "",
+                    "origen_fecha_cobro": (
+                        "BANCO" if fecha_cobro_banco else origen_fecha_cobro
+                    ),
                     "mensaje": mensaje,
                 }
             )
@@ -1166,21 +1172,42 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             fila["diferencia"] = "No registrada localmente"
         diferencias_notas_debito = notas_locales_sin_banco + notas_debito_no_ingresadas
         corte_historico = fecha_corte or estado_banco.get("fecha_fin")
-        fechas_cobro_guardadas = {
-            fila["Num_norm"]: _texto_celda(fila.get("Fecha_cobro", ""))
+        datos_historicos_cheques = {
+            fila["Num_norm"]: {
+                "fecha_cobro": _texto_celda(fila.get("Fecha_cobro", "")),
+                "origen": _texto_celda(fila.get("Origen_fecha_cobro", "")),
+                "fecha_emision": (
+                    None if pd.isna(fila["Fecha_dt"]) else fila["Fecha_dt"]
+                ),
+            }
             for _, fila in df_nuestro.iterrows()
             if fila.get("Num_norm")
         }
+        inicio_estado = estado_banco.get("fecha_inicio")
         for cheque in cheques:
             if cheque["resultado"] != "TRANSITO":
                 continue
-            fecha_cobro = fechas_cobro_guardadas.get(cheque["num"], "")
-            if fecha_cobro and corte_historico and fecha_cobro <= corte_historico:
+            datos = datos_historicos_cheques.get(cheque["num"], {})
+            fecha_cobro = datos.get("fecha_cobro", "")
+            origen = datos.get("origen", "")
+            if (
+                origen in {"BANCO", "ADMIN"}
+                and fecha_cobro
+                and corte_historico
+                and fecha_cobro <= corte_historico
+            ):
                 cheque["resultado"] = "COBRADO_ANTERIOR"
                 cheque["fecha_cobro"] = fecha_cobro
                 cheque["mensaje"] = (
                     f"Cheque {cheque['num']} ya estaba cobrado el {fecha_cobro}."
                 )
+            elif (
+                origen not in {"BANCO", "ADMIN"}
+                and inicio_estado
+                and datos.get("fecha_emision") is not None
+                and datos["fecha_emision"] < pd.Timestamp(inicio_estado)
+            ):
+                cheque["resultado"] = "FUERA_PERIODO"
 
         cheques_cobrados = [
             cheque for cheque in cheques if cheque["resultado"] not in {"TRANSITO", "ANULADO"}
