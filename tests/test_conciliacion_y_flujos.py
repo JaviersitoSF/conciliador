@@ -234,6 +234,18 @@ def test_anulacion_posterior_al_corte_deja_el_cheque_en_transito():
     assert [fila["num"] for fila in resultado["cheques_transito"]] == ["23"]
 
 
+def test_anulacion_posterior_conserva_cheque_anterior_en_transito():
+    main.guardar_cheque_en_archivo("24", "2026-05-31", "PROVEEDOR", "600")
+    main.anular_cheque_numero("24")
+    crear_estado_bi("junio.csv", filas=[])
+
+    resultado = main.obtener_conciliacion(
+        archivo_banco="junio.csv", fecha_corte="2026-06-30"
+    )
+
+    assert [fila["num"] for fila in resultado["cheques_transito"]] == ["24"]
+
+
 def test_conciliacion_lee_csv_banco_industrial_y_separa_otros_cargos():
     cuenta_id = main.crear_cuenta_bancaria(
         "BANCO INDUSTRIAL", "Monetaria", "048-000322-8"

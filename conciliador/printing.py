@@ -283,7 +283,7 @@ def calcular_resumen_conciliacion(resultado):
         if saldo_conciliado is not None and saldo_banco is not None
         else None
     )
-    return {
+    resumen = {
         "saldo_libros": saldo_libros,
         "saldo_libros_calculado": saldo_libros_calculado,
         **ajustes,
@@ -291,6 +291,27 @@ def calcular_resumen_conciliacion(resultado):
         "saldo_banco": saldo_banco,
         "diferencia": diferencia,
     }
+    saldos_libros = resultado.get("saldos_libros")
+    if saldos_libros:
+        resumen["saldo_banco_inicial"] = convertir_monto(
+            estado.get("saldo_inicial")
+        )
+        resumen["cheques_apertura"] = convertir_monto(
+            saldos_libros.get("cheques_apertura")
+        )
+        resumen["saldo_libros_inicial"] = convertir_monto(
+            saldos_libros.get("saldo_inicial")
+        )
+        resumen["depositos_libros"] = convertir_monto(
+            saldos_libros.get("depositos")
+        )
+        resumen["cheques_libros"] = convertir_monto(
+            saldos_libros.get("cheques")
+        )
+        resumen["notas_debito_libros"] = convertir_monto(
+            saldos_libros.get("notas_debito")
+        )
+    return resumen
 
 
 def _parrafo(valor, estilo):
@@ -458,10 +479,20 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
     ]))
     elementos.extend((tabla_cuenta, Spacer(1, 0.3 * cm)))
 
-    etiqueta_libros = "Saldo según libros"
+    etiqueta_libros = "Saldo según libros final"
     if resumen["saldo_libros_calculado"]:
         etiqueta_libros += " (calculado)"
-    filas_resumen = (
+    filas_libros = []
+    if "saldo_libros_inicial" in resumen:
+        filas_libros = [
+            ("Saldo según estado de cuenta inicial", resumen["saldo_banco_inicial"]),
+            ("(-) Cheques en circulación al inicio", resumen["cheques_apertura"]),
+            ("Saldo según libros inicial", resumen["saldo_libros_inicial"]),
+            ("(+) Depósitos registrados del período", resumen["depositos_libros"]),
+            ("(-) Cheques emitidos del período", resumen["cheques_libros"]),
+            ("(-) Notas de débito registradas del período", resumen["notas_debito_libros"]),
+        ]
+    filas_resumen = tuple(filas_libros) + (
         (etiqueta_libros, resumen["saldo_libros"]),
         ("(+) Cheques en circulación", resumen["cheques_transito"]),
         (
@@ -486,12 +517,20 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
         colWidths=(13.2 * cm, 5.1 * cm),
         hAlign="CENTER",
     )
+    indice_saldo_final_libros = len(filas_libros)
+    indice_saldo_inicial_libros = 2 if filas_libros else 0
+    indice_saldo_conciliado = indice_saldo_final_libros + 8
+    indice_saldo_banco = indice_saldo_final_libros + 9
     tabla_resumen.setStyle(TableStyle([
-        ("LINEABOVE", (0, 7), (-1, 7), 0.8, colors.HexColor("#404040")),
-        ("LINEABOVE", (0, 9), (-1, 9), 0.8, colors.HexColor("#404040")),
+        ("LINEABOVE", (0, indice_saldo_final_libros), (-1, indice_saldo_final_libros), 0.8, colors.HexColor("#404040")),
+        ("LINEABOVE", (0, indice_saldo_inicial_libros), (-1, indice_saldo_inicial_libros), 0.8, colors.HexColor("#404040")),
+        ("LINEABOVE", (0, indice_saldo_conciliado), (-1, indice_saldo_conciliado), 0.8, colors.HexColor("#404040")),
+        ("LINEABOVE", (0, indice_saldo_banco), (-1, indice_saldo_banco), 0.8, colors.HexColor("#404040")),
         ("FONTNAME", (0, 0), (-1, 0), FUENTE_NEGRITA),
-        ("FONTNAME", (0, 7), (-1, -1), FUENTE_NEGRITA),
-        ("BACKGROUND", (0, 8), (-1, 8), colors.HexColor("#EDF3F8")),
+        ("FONTNAME", (0, indice_saldo_inicial_libros), (-1, indice_saldo_inicial_libros), FUENTE_NEGRITA),
+        ("FONTNAME", (0, indice_saldo_final_libros), (-1, indice_saldo_final_libros), FUENTE_NEGRITA),
+        ("FONTNAME", (0, indice_saldo_conciliado), (-1, -1), FUENTE_NEGRITA),
+        ("BACKGROUND", (0, indice_saldo_banco), (-1, indice_saldo_banco), colors.HexColor("#EDF3F8")),
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),

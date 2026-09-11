@@ -38,6 +38,59 @@ def _separar(locales, bancarios):
     )
 
 
+def test_saldos_libros_siguen_operaciones_sin_despejar_del_saldo_final(monkeypatch):
+    cheques = pd.DataFrame([
+        {
+            "Fecha_dt": pd.Timestamp("2026-06-25"),
+            "Monto_valor": Decimal("8231.85"), "Estado": "TRANSITO",
+            "Fecha_cobro": "2026-07-10", "Origen_fecha_cobro": "BANCO",
+            "Fecha_anulacion": "", "Origen_fecha_anulacion": "",
+        },
+        {
+            "Fecha_dt": pd.Timestamp("2026-06-25"),
+            "Monto_valor": Decimal("600.00"), "Estado": "ANULADO",
+            "Fecha_cobro": "", "Origen_fecha_cobro": "",
+            "Fecha_anulacion": "2026-09-03",
+            "Origen_fecha_anulacion": "OPERACION",
+        },
+        {
+            "Fecha_dt": pd.Timestamp("2026-07-01"),
+            "Monto_valor": Decimal("64556.25"), "Estado": "ANULADO",
+            "Fecha_cobro": "", "Origen_fecha_cobro": "",
+            "Fecha_anulacion": "2026-08-07",
+            "Origen_fecha_anulacion": "OPERACION",
+        },
+    ])
+    depositos = pd.DataFrame([{
+        "Fecha_dt": pd.Timestamp("2026-07-15"),
+        "Monto_valor": Decimal("58262.73"), "Estado": "REGISTRADO",
+    }])
+    notas = pd.DataFrame([{
+        "Fecha_dt": pd.Timestamp("2026-07-20"),
+        "Monto_valor": Decimal("0.55"), "Estado": "REGISTRADO",
+    }])
+    monkeypatch.setattr(analytics, "cargar_depositos_registrados", lambda _id: depositos)
+    monkeypatch.setattr(analytics, "cargar_notas_debito_registradas", lambda _id: notas)
+
+    saldos = analytics._calcular_saldos_libros(
+        5, cheques,
+        {
+            "fecha_inicio": "2026-07-01", "fecha_fin": "2026-07-31",
+            "saldo_inicial": Decimal("11780.13"),
+        },
+        "2026-07-31",
+    )
+
+    assert saldos == {
+        "saldo_inicial": Decimal("2948.28"),
+        "saldo_final": Decimal("-3345.79"),
+        "cheques_apertura": Decimal("8831.85"),
+        "depositos": Decimal("58262.73"),
+        "cheques": Decimal("64556.25"),
+        "notas_debito": Decimal("0.55"),
+    }
+
+
 @pytest.mark.parametrize(
     ("fecha_banco", "coincide"),
     [

@@ -694,6 +694,89 @@ def _cuentas_coinciden(numero_archivo, numero_configurado):
 VENTANA_CONCILIACION_MOVIMIENTOS_DIAS = 7
 
 
+def _total_vigente_periodo(df, inicio, corte):
+    if df.empty:
+        return Decimal("0.00")
+    filas = df[
+        df["Fecha_dt"].notna()
+        & (df["Fecha_dt"] >= pd.Timestamp(inicio))
+        & (df["Fecha_dt"] <= pd.Timestamp(corte))
+    ]
+    return sum(
+        (
+            fila["Monto_valor"]
+            for _, fila in filas.iterrows()
+            if fila["Monto_valor"] is not None
+            and str(fila.get("Estado", "")).upper() != "ANULADO"
+        ),
+        Decimal("0.00"),
+    )
+
+
+def _calcular_saldos_libros(cuenta_id, cheques, estado_banco, fecha_corte):
+    inicio = estado_banco.get("fecha_inicio")
+    corte = fecha_corte or estado_banco.get("fecha_fin")
+    saldo_banco_inicial = convertir_monto(estado_banco.get("saldo_inicial"))
+    if not inicio or not corte or saldo_banco_inicial is None:
+        return None
+
+    cheques_apertura = Decimal("0.00")
+    cheques_periodo = Decimal("0.00")
+    for _, cheque in cheques.iterrows():
+        fecha_emision = cheque.get("Fecha_dt")
+        monto = cheque.get("Monto_valor")
+        if pd.isna(fecha_emision) or monto is None:
+            continue
+        fecha_emision = fecha_emision.date().isoformat()
+        fecha_cobro = _texto_celda(cheque.get("Fecha_cobro", ""))
+        origen_cobro = _texto_celda(cheque.get("Origen_fecha_cobro", ""))
+        fecha_anulacion = _texto_celda(cheque.get("Fecha_anulacion", ""))
+        origen_anulacion = _texto_celda(
+            cheque.get("Origen_fecha_anulacion", "")
+        )
+
+        if fecha_emision < inicio:
+            cobro_posterior = (
+                origen_cobro in {"BANCO", "ADMIN"}
+                and fecha_cobro >= inicio
+            )
+            anulacion_posterior = (
+                origen_anulacion in {"OPERACION", "ADMIN"}
+                and fecha_anulacion >= inicio
+            )
+            if cobro_posterior or anulacion_posterior:
+                cheques_apertura += monto
+            continue
+
+        if fecha_emision > corte:
+            continue
+        anulado_al_corte = (
+            str(cheque.get("Estado", "")).upper() == "ANULADO"
+            and fecha_anulacion
+            and fecha_anulacion <= corte
+        )
+        if not anulado_al_corte:
+            cheques_periodo += monto
+
+    depositos = cargar_depositos_registrados(cuenta_id)
+    notas_debito = cargar_notas_debito_registradas(cuenta_id)
+    total_depositos = _total_vigente_periodo(depositos, inicio, corte)
+    total_notas_debito = _total_vigente_periodo(notas_debito, inicio, corte)
+    saldo_libros_inicial = saldo_banco_inicial - cheques_apertura
+    saldo_libros_final = (
+        saldo_libros_inicial + total_depositos
+        - cheques_periodo - total_notas_debito
+    )
+    return {
+        "saldo_inicial": saldo_libros_inicial,
+        "saldo_final": saldo_libros_final,
+        "cheques_apertura": cheques_apertura,
+        "depositos": total_depositos,
+        "cheques": cheques_periodo,
+        "notas_debito": total_notas_debito,
+    }
+
+
 def _separar_movimientos_no_ingresados(locales, bancarios, fecha_inicio, fecha_corte):
     """Hace un cotejo uno-a-uno y devuelve movimientos sin contraparte.
 
@@ -1223,6 +1306,12 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 "fecha_emision": (
                     None if pd.isna(fila["Fecha_dt"]) else fila["Fecha_dt"]
                 ),
+                "fecha_anulacion": _texto_celda(
+                    fila.get("Fecha_anulacion", "")
+                ),
+                "origen_anulacion": _texto_celda(
+                    fila.get("Origen_fecha_anulacion", "")
+                ),
             }
             for _, fila in df_nuestro.iterrows()
             if fila.get("Num_norm")
@@ -1246,6 +1335,12 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 )
             elif (
                 origen not in {"BANCO", "ADMIN"}
+                and not (
+                    datos.get("origen_anulacion") in {"OPERACION", "ADMIN"}
+                    and datos.get("fecha_anulacion")
+                    and corte_historico
+                    and datos["fecha_anulacion"] > corte_historico
+                )
                 and inicio_estado
                 and datos.get("fecha_emision") is not None
                 and datos["fecha_emision"] < pd.Timestamp(inicio_estado)
@@ -1261,6 +1356,9 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             for cheque in cheques
             if cheque["resultado"] == "TRANSITO"
         ]
+        saldos_libros = _calcular_saldos_libros(
+            cuenta["id"], df_nuestro, estado_banco, fecha_corte
+        )
 
         def resumen(filas):
             return {
@@ -1283,6 +1381,10 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 "saldo_inicial": estado_banco.get("saldo_inicial"),
                 "saldo_final": estado_banco.get("saldo_final"),
             },
+            "saldo_libros": (
+                saldos_libros["saldo_final"] if saldos_libros else None
+            ),
+            "saldos_libros": saldos_libros,
             "cheques": cheques,
             "no_registrados": no_registrados,
             "cheques_cobrados": cheques_cobrados,
