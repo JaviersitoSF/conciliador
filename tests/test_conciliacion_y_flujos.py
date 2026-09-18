@@ -201,6 +201,30 @@ def test_conciliacion_guarda_fecha_cobro_y_respeta_un_corte_anterior():
     assert [fila["num"] for fila in junio["cheques_transito"]] == ["7"]
 
 
+def test_conciliacion_no_guarda_cobros_si_falla_un_cotejo_posterior():
+    main.guardar_cheque_en_archivo("7", "2026-05-20", "PROVEEDOR", "100")
+    crear_estado_bi(
+        "julio.csv", fin="31/07/2026",
+        filas=["10-07-2026,CQ,COMPENSACIÓN,7,100,,900.00"],
+    )
+
+    with patch(
+        "conciliador.analytics._separar_movimientos_no_ingresados",
+        side_effect=RuntimeError("fallo posterior"),
+    ):
+        with pytest.raises(main.ErrorOperacion, match="fallo posterior"):
+            main.obtener_conciliacion(
+                archivo_banco="julio.csv", fecha_corte="2026-07-31"
+            )
+
+    cheque = main.cargar_cheques_registrados().iloc[0]
+    assert cheque["Fecha_cobro"] == ""
+    with main.conectar_db() as conexion:
+        assert conexion.execute(
+            "SELECT COUNT(*) FROM auditoria WHERE accion = 'COBRAR'"
+        ).fetchone()[0] == 0
+
+
 def test_conciliacion_excluye_historicos_con_fecha_provisional():
     main.guardar_cheque_en_archivo("20", "2025-01-10", "MIGRADO", "100")
     main.guardar_cheque_en_archivo("21", "2025-01-11", "CONFIRMADO", "200")

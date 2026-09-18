@@ -619,6 +619,10 @@ def actualizar_cheque(
                 raise ErrorOperacion("⚠️ Un cheque anulado no se puede editar.")
             if not fecha_cobro_suministrada:
                 fecha_cobro = cheque["fecha_cobro"]
+            if fecha_cobro and fecha_cobro < fecha:
+                raise ErrorOperacion(
+                    "La fecha de cobro no puede ser anterior a la emisión del cheque."
+                )
             cambio_fecha_cobro = fecha_cobro != cheque["fecha_cobro"]
             if cambio_fecha_cobro:
                 from .storage import verificar_contrasena_admin

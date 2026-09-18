@@ -1107,16 +1107,14 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 }
             )
 
-        registrar_fechas_cobro(cuenta["id"], fechas_cobro_detectadas)
         if fechas_cobro_detectadas:
             # Los saldos de apertura y los cheques históricos deben usar las
-            # fechas bancarias confirmadas en esta misma conciliación.
-            df_nuestro = cargar_cheques_registrados(cuenta["id"])
-            if fecha_corte is not None:
-                df_nuestro = df_nuestro[
-                    df_nuestro["Fecha_dt"].notna()
-                    & (df_nuestro["Fecha_dt"] <= pd.Timestamp(fecha_corte))
-                ].copy()
+            # fechas bancarias sin persistirlas antes de terminar los cotejos.
+            fechas_por_numero = dict(fechas_cobro_detectadas)
+            fechas_confirmadas = df_nuestro["Num_norm"].map(fechas_por_numero)
+            confirmados = fechas_confirmadas.notna()
+            df_nuestro.loc[confirmados, "Fecha_cobro"] = fechas_confirmadas[confirmados]
+            df_nuestro.loc[confirmados, "Origen_fecha_cobro"] = "BANCO"
 
         detalles_cheques = {
             fila["Num_norm"]: {
@@ -1378,7 +1376,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 ),
             }
 
-        return {
+        resultado = {
             "cuenta": cuenta,
             "fecha_corte": fecha_corte,
             "estado_cuenta": {
@@ -1423,6 +1421,8 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 "diferencias_notas_debito": resumen(diferencias_notas_debito),
             },
         }
+        registrar_fechas_cobro(cuenta["id"], fechas_cobro_detectadas)
+        return resultado
 
     except ErrorOperacion:
         raise

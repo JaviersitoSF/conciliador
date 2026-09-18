@@ -78,6 +78,27 @@ def test_edicion_ordinaria_conserva_fecha_y_origen_de_cobro():
     assert cheque["Origen_fecha_cobro"] == "BANCO"
 
 
+def test_no_mueve_emision_despues_del_cobro_ya_guardado():
+    main.guardar_cheque_en_archivo("19", "2026-06-01", "A", "10")
+    cheque_id = int(main.cargar_cheques_registrados().iloc[0]["Id"])
+    with main.conectar_db() as conexion:
+        conexion.execute(
+            "UPDATE cheques SET fecha_cobro = '2026-06-10', "
+            "fecha_cobro_origen = 'BANCO' WHERE id = ?",
+            (cheque_id,),
+        )
+
+    with pytest.raises(main.ErrorOperacion, match="anterior a la emisión"):
+        main.actualizar_cheque(
+            cheque_id, "19", "2026-06-20", "NUEVO NOMBRE", "10", cuenta_id=1
+        )
+
+    cheque = main.cargar_cheques_registrados().iloc[0]
+    assert cheque["Fecha"] == "2026-06-01"
+    assert cheque["Fecha_cobro"] == "2026-06-10"
+    assert cheque["Nombre"] == "A"
+
+
 def test_anular_guarda_fecha_y_correccion_exige_clave_admin():
     main.guardar_cheque_en_archivo("20", "2026-06-01", "A", "10")
     main.anular_cheque_numero("20")
