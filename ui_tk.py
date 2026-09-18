@@ -1178,12 +1178,17 @@ class ConciliadorApp(tk.Tk):
             ("diferencias_notas_debito", "Diferencias de notas de débito"),
             ("cheques_banco_sin_registro", "Cheques sin registro"),
         )
-        self.resumen_conciliacion.configure(
-            text="   |   ".join([
-                f"{titulo}: {resumen[clave]['cantidad']} · {simbolo} {core.formatear_monto(resumen[clave]['total'])}"
-                for clave, titulo in etiquetas
-            ] + [f"Filas inválidas: {resumen['filas_invalidas']['cantidad']}"])
-        )
+        resumen_textos = [
+            f"{titulo}: {resumen[clave]['cantidad']} · {simbolo} {core.formatear_monto(resumen[clave]['total'])}"
+            for clave, titulo in etiquetas
+        ] + [f"Filas inválidas: {resumen['filas_invalidas']['cantidad']}"]
+        diferencia_mes = resultado.get("diferencia_movimientos_periodo")
+        if diferencia_mes is not None:
+            resumen_textos.append(
+                "Diferencia de movimientos del mes antes de ajustes: "
+                f"{simbolo} {core.formatear_monto(diferencia_mes)}"
+            )
+        self.resumen_conciliacion.configure(text="   |   ".join(resumen_textos))
         self.resultado_conciliacion = resultado
         self.boton_imprimir_conciliacion.configure(state="normal")
         mensajes_vacios = (

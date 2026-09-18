@@ -508,6 +508,11 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
         ("Saldo según estado de cuenta", resumen["saldo_banco"]),
         ("Diferencia", resumen["diferencia"]),
     )
+    if resultado.get("diferencia_movimientos_periodo") is not None:
+        filas_resumen += ((
+            "Diferencia de movimientos del mes antes de ajustes",
+            resultado["diferencia_movimientos_periodo"],
+        ),)
     datos_resumen = [
         [_parrafo(etiqueta, estilo_celda), _parrafo(_monto_resumen(valor, simbolo), estilo_celda_derecha)]
         for etiqueta, valor in filas_resumen

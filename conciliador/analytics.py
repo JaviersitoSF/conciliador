@@ -382,6 +382,7 @@ def _leer_csv_banrural(archivo):
 
     filas = list(csv.reader(contenido.splitlines()))
     cuenta_numero = cuenta_nombre = fecha_inicio = fecha_fin = moneda = None
+    saldo_inicial = None
     saldo_final = None
     indice_cabecera = None
     for indice, fila in enumerate(filas):
@@ -412,6 +413,10 @@ def _leer_csv_banrural(archivo):
         raise ErrorOperacion(
             "⚠️ El estado de Banrural no contiene todas las columnas esperadas."
         )
+    if "saldo contable" not in columnas:
+        raise ErrorOperacion(
+            "⚠️ El estado de Banrural no contiene saldos contables para verificar el período."
+        )
 
     cheques, depositos, notas_debito = [], [], []
     filas_invalidas = []
@@ -437,15 +442,15 @@ def _leer_csv_banrural(archivo):
                 descripcion, None, "Fecha inválida",
             )
             continue
-        indice_saldo = columnas.get("saldo contable")
-        if indice_saldo is not None:
-            saldo_fila = convertir_monto(fila[indice_saldo])
-            if saldo_fila is not None:
-                saldo_final = saldo_fila
+        saldo_fila = convertir_monto(fila[columnas["saldo contable"]])
         tiene_debito = debito is not None and debito != 0
         tiene_credito = credito is not None and credito != 0
         if tiene_debito == tiene_credito:
             if debito == 0 and credito == 0:
+                if saldo_final is not None and saldo_fila != saldo_final:
+                    raise ErrorOperacion(
+                        f"⚠️ El saldo contable de Banrural no cuadra en la fila {numero_fila}."
+                    )
                 continue
             monto = (
                 abs(debito or credito)
@@ -462,6 +467,18 @@ def _leer_csv_banrural(archivo):
                 descripcion, monto, detalle,
             )
             continue
+        if saldo_fila is None:
+            raise ErrorOperacion(
+                f"⚠️ Falta el saldo contable de Banrural en la fila {numero_fila}."
+            )
+        cambio = (credito or Decimal("0.00")) - (debito or Decimal("0.00"))
+        if saldo_inicial is None:
+            saldo_inicial = saldo_fila - cambio
+        elif saldo_final + cambio != saldo_fila:
+            raise ErrorOperacion(
+                f"⚠️ El saldo contable de Banrural no cuadra en la fila {numero_fila}."
+            )
+        saldo_final = saldo_fila
         if tiene_debito:
             movimiento = {
                 "Num_cheque": cheque or referencia,
@@ -480,6 +497,11 @@ def _leer_csv_banrural(archivo):
                 "fecha": fecha, "tipo": "DP", "descripcion": descripcion,
             })
 
+    if saldo_inicial is None:
+        raise ErrorOperacion(
+            "⚠️ El estado de Banrural no contiene movimientos con saldo contable para verificar el período."
+        )
+
     return {
         "cheques": pd.DataFrame(
             cheques, columns=["Num_cheque", "Monto", "fecha", "tipo", "descripcion"]
@@ -494,7 +516,7 @@ def _leer_csv_banrural(archivo):
         "fecha_inicio": fecha_inicio,
         "fecha_fin": fecha_fin,
         "moneda": (moneda or "GTQ").upper(),
-        "saldo_inicial": None,
+        "saldo_inicial": saldo_inicial,
         "saldo_final": saldo_final,
     }
 
@@ -1366,6 +1388,12 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
         saldos_libros = _calcular_saldos_libros(
             cuenta["id"], df_nuestro, estado_banco, fecha_corte
         )
+        diferencia_movimientos_periodo = None
+        if cuenta["formato_conciliacion"] == "Banrural" and saldos_libros:
+            diferencia_movimientos_periodo = (
+                saldos_libros["saldo_final"] - saldos_libros["saldo_inicial"]
+                - (estado_banco["saldo_final"] - estado_banco["saldo_inicial"])
+            )
 
         def resumen(filas):
             return {
@@ -1392,6 +1420,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                 saldos_libros["saldo_final"] if saldos_libros else None
             ),
             "saldos_libros": saldos_libros,
+            "diferencia_movimientos_periodo": diferencia_movimientos_periodo,
             "cheques": cheques,
             "no_registrados": no_registrados,
             "cheques_cobrados": cheques_cobrados,
