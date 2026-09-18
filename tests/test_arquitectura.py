@@ -95,6 +95,14 @@ def test_migracion_recupera_origen_de_fechas_desde_auditoria(tmp_path):
     database = Database(paths)
     database.initialize()
     with database.connect() as connection:
+        connection.execute(
+            "UPDATE schema_migrations SET applied_at = '2026-05-15 12:00:00' "
+            "WHERE version = 9"
+        )
+        fecha_migracion = connection.execute(
+            "SELECT date(applied_at, 'localtime') FROM schema_migrations "
+            "WHERE version = 9"
+        ).fetchone()[0]
         banco = connection.execute(
             "INSERT INTO cheques "
             "(cuenta_id, numero, fecha, nombre, monto, fecha_cobro) "
@@ -108,7 +116,8 @@ def test_migracion_recupera_origen_de_fechas_desde_auditoria(tmp_path):
         connection.execute(
             "INSERT INTO cheques "
             "(cuenta_id, numero, fecha, nombre, monto, fecha_cobro) "
-            "VALUES (1, '12', '2026-01-01', 'C', '10', '2026-09-11')"
+            "VALUES (1, '12', '2026-01-01', 'C', '10', ?)",
+            (fecha_migracion,),
         )
         connection.execute(
             "INSERT INTO auditoria (accion, entidad, entidad_id, detalle) "
