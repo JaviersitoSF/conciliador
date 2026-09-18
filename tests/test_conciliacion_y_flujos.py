@@ -273,6 +273,28 @@ def test_anulacion_posterior_conserva_cheque_anterior_en_transito():
     assert [fila["num"] for fila in resultado["cheques_transito"]] == ["24"]
 
 
+def test_anulacion_del_mes_revierte_cheque_de_periodo_anterior():
+    main.guardar_cheque_en_archivo("25", "2026-05-31", "PROVEEDOR", "100")
+    main.anular_cheque_numero("25")
+    with main.conectar_db() as conexion:
+        conexion.execute(
+            "UPDATE cheques SET fecha_anulacion = '2026-06-15' "
+            "WHERE numero = '25'"
+        )
+    crear_estado_bi("junio.csv", filas=[])
+
+    resultado = main.obtener_conciliacion(
+        archivo_banco="junio.csv", fecha_corte="2026-06-30"
+    )
+    resumen = printing.calcular_resumen_conciliacion(resultado)
+
+    assert resultado["saldos_libros"]["cheques_apertura"] == Decimal("100.00")
+    assert resultado["saldos_libros"]["cheques_anulados"] == Decimal("100.00")
+    assert resultado["saldos_libros"]["saldo_final"] == Decimal("1430.10")
+    assert resumen["saldo_libros"] == Decimal("1430.10")
+    assert resultado["cheques_transito"] == []
+
+
 def test_conciliacion_lee_csv_banco_industrial_y_separa_otros_cargos():
     cuenta_id = main.crear_cuenta_bancaria(
         "BANCO INDUSTRIAL", "Monetaria", "048-000322-8"

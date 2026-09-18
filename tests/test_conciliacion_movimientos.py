@@ -87,6 +87,7 @@ def test_saldos_libros_siguen_operaciones_sin_despejar_del_saldo_final(monkeypat
         "cheques_apertura": Decimal("8831.85"),
         "depositos": Decimal("58262.73"),
         "cheques": Decimal("64556.25"),
+        "cheques_anulados": Decimal("0.00"),
         "notas_debito": Decimal("0.55"),
     }
 

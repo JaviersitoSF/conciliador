@@ -744,6 +744,7 @@ def _calcular_saldos_libros(cuenta_id, cheques, estado_banco, fecha_corte):
 
     cheques_apertura = Decimal("0.00")
     cheques_periodo = Decimal("0.00")
+    cheques_anulados_periodo = Decimal("0.00")
     for _, cheque in cheques.iterrows():
         fecha_emision = cheque.get("Fecha_dt")
         monto = cheque.get("Monto_valor")
@@ -768,6 +769,8 @@ def _calcular_saldos_libros(cuenta_id, cheques, estado_banco, fecha_corte):
             )
             if cobro_posterior or anulacion_posterior:
                 cheques_apertura += monto
+                if anulacion_posterior and fecha_anulacion <= corte:
+                    cheques_anulados_periodo += monto
             continue
 
         if fecha_emision > corte:
@@ -787,7 +790,7 @@ def _calcular_saldos_libros(cuenta_id, cheques, estado_banco, fecha_corte):
     saldo_libros_inicial = saldo_banco_inicial - cheques_apertura
     saldo_libros_final = (
         saldo_libros_inicial + total_depositos
-        - cheques_periodo - total_notas_debito
+        - cheques_periodo - total_notas_debito + cheques_anulados_periodo
     )
     return {
         "saldo_inicial": saldo_libros_inicial,
@@ -795,6 +798,7 @@ def _calcular_saldos_libros(cuenta_id, cheques, estado_banco, fecha_corte):
         "cheques_apertura": cheques_apertura,
         "depositos": total_depositos,
         "cheques": cheques_periodo,
+        "cheques_anulados": cheques_anulados_periodo,
         "notas_debito": total_notas_debito,
     }
 

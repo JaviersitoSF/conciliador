@@ -308,6 +308,9 @@ def calcular_resumen_conciliacion(resultado):
         resumen["cheques_libros"] = convertir_monto(
             saldos_libros.get("cheques")
         )
+        resumen["cheques_anulados_libros"] = convertir_monto(
+            saldos_libros.get("cheques_anulados")
+        ) or Decimal("0.00")
         resumen["notas_debito_libros"] = convertir_monto(
             saldos_libros.get("notas_debito")
         )
@@ -492,6 +495,10 @@ def exportar_conciliacion_pdf(resultado, archivo_salida):
             ("(-) Cheques emitidos del período", resumen["cheques_libros"]),
             ("(-) Notas de débito registradas del período", resumen["notas_debito_libros"]),
         ]
+        if resumen["cheques_anulados_libros"]:
+            filas_libros.append(
+                ("(+) Cheques de períodos anteriores anulados", resumen["cheques_anulados_libros"])
+            )
     filas_resumen = tuple(filas_libros) + (
         (etiqueta_libros, resumen["saldo_libros"]),
         ("(+) Cheques en circulación", resumen["cheques_transito"]),
