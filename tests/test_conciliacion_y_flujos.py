@@ -185,10 +185,13 @@ def test_conciliacion_guarda_fecha_cobro_y_respeta_un_corte_anterior():
         filas=["10-07-2026,CQ,COMPENSACIÓN,7,100,,900.00"],
     )
 
-    main.obtener_conciliacion(
+    julio = main.obtener_conciliacion(
         archivo_banco="julio.csv", fecha_corte="2026-07-31"
     )
     assert main.cargar_cheques_registrados().iloc[0]["Fecha_cobro"] == "2026-07-10"
+    assert julio["saldos_libros"]["cheques_apertura"] == Decimal("100.00")
+    assert julio["saldos_libros"]["saldo_inicial"] == Decimal("1330.10")
+    assert julio["cheques"][0]["fecha_cobro"] == "2026-07-10"
 
     crear_estado_bi("junio.csv", filas=[])
     junio = main.obtener_conciliacion(

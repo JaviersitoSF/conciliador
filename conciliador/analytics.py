@@ -1099,7 +1099,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
                     "resultado": resultado,
                     "monto_nuestro": monto_nuestro,
                     "monto_banco": monto_banco,
-                    "fecha_cobro": fecha_cobro_guardada or fecha_cobro_banco or "",
+                    "fecha_cobro": fecha_cobro_banco or fecha_cobro_guardada or "",
                     "origen_fecha_cobro": (
                         "BANCO" if fecha_cobro_banco else origen_fecha_cobro
                     ),
@@ -1108,6 +1108,15 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             )
 
         registrar_fechas_cobro(cuenta["id"], fechas_cobro_detectadas)
+        if fechas_cobro_detectadas:
+            # Los saldos de apertura y los cheques históricos deben usar las
+            # fechas bancarias confirmadas en esta misma conciliación.
+            df_nuestro = cargar_cheques_registrados(cuenta["id"])
+            if fecha_corte is not None:
+                df_nuestro = df_nuestro[
+                    df_nuestro["Fecha_dt"].notna()
+                    & (df_nuestro["Fecha_dt"] <= pd.Timestamp(fecha_corte))
+                ].copy()
 
         detalles_cheques = {
             fila["Num_norm"]: {
