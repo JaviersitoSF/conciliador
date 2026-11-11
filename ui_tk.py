@@ -1182,6 +1182,8 @@ class ConciliadorApp(tk.Tk):
             f"{titulo}: {resumen[clave]['cantidad']} · {simbolo} {core.formatear_monto(resumen[clave]['total'])}"
             for clave, titulo in etiquetas
         ] + [f"Filas inválidas: {resumen['filas_invalidas']['cantidad']}"]
+        if resultado.get("advertencias"):
+            messagebox.showwarning("Estado de cuenta recuperado", "\n".join(resultado["advertencias"]))
         diferencia_mes = resultado.get("diferencia_movimientos_periodo")
         if diferencia_mes is not None:
             resumen_textos.append(

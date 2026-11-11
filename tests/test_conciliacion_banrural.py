@@ -100,3 +100,54 @@ def test_banrural_rechaza_saldo_acumulado_inconsistente(tmp_path):
 
     with pytest.raises(ErrorOperacion, match="no cuadra en la fila 7"):
         analytics._leer_csv_banrural(archivo)
+
+
+@pytest.mark.parametrize('descripcion', ['Bolsa, pequeña', 'Bolsa, pequeña, senior'])
+def test_recupera_comas_y_avisa(tmp_path, descripcion):
+    archivo = tmp_path / 'estado.csv'
+    crear_estado_banrural(archivo)
+    texto = archivo.read_text(encoding='latin-1').replace('DEPOSITO COMPLETO', descripcion)
+    archivo.write_text(texto, encoding='latin-1')
+    estado = analytics._leer_csv_banrural(archivo)
+    assert estado['depositos'][0]['descripcion'] == descripcion
+    assert estado['depositos'][0]['Monto'] == Decimal('361.00')
+    assert estado['advertencias'] == [f'Fila 7: se recuperó la descripción con comas: {descripcion}']
+
+
+@pytest.mark.parametrize('reemplazo', ['0,361.0,462,462', '0,malo,461,461'])
+def test_no_recupera_columnas_sin_validacion(tmp_path, reemplazo):
+    archivo = tmp_path / 'estado.csv'
+    crear_estado_banrural(archivo)
+    texto = archivo.read_text(encoding='latin-1').replace('DEPOSITO COMPLETO', 'Deposito, completo').replace('0,361.0,461,461', reemplazo)
+    archivo.write_text(texto, encoding='latin-1')
+    with pytest.raises(ErrorOperacion, match='fila 7'):
+        analytics._leer_csv_banrural(archivo)
+
+
+def test_descripcion_entrecomillada_no_necesita_recuperacion(tmp_path):
+    archivo = tmp_path / 'estado.csv'
+    crear_estado_banrural(archivo)
+    texto = archivo.read_text(encoding='latin-1').replace('DEPOSITO COMPLETO', '"Deposito, completo"')
+    archivo.write_text(texto, encoding='latin-1')
+    estado = analytics._leer_csv_banrural(archivo)
+    assert estado['depositos'][0]['descripcion'] == 'Deposito, completo'
+    assert estado['advertencias'] == []
+
+
+def test_columnas_faltantes_se_reportan_en_la_misma_fila(tmp_path):
+    archivo = tmp_path / 'estado.csv'
+    crear_estado_banrural(archivo)
+    texto = archivo.read_text(encoding='latin-1').replace('0,361.0,461,461', '0,361.0,461')
+    archivo.write_text(texto, encoding='latin-1')
+    with pytest.raises(ErrorOperacion, match='columnas incorrecto en la fila 7'):
+        analytics._leer_csv_banrural(archivo)
+
+
+@pytest.mark.parametrize("campo", ["1234,99", "1234,LOCAL", "1234,"])
+def test_no_recupera_coma_ambigua_en_campo_cheque(tmp_path, campo):
+    archivo = tmp_path / 'estado.csv'
+    crear_estado_banrural(archivo)
+    texto = archivo.read_text(encoding='latin-1').replace('49518610,2,EFECTIVO', f'49518610,2,{campo}')
+    archivo.write_text(texto, encoding='latin-1')
+    with pytest.raises(ErrorOperacion, match='recuperar con seguridad.*fila 7'):
+        analytics._leer_csv_banrural(archivo)

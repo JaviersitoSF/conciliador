@@ -420,9 +420,34 @@ def _leer_csv_banrural(archivo):
 
     cheques, depositos, notas_debito = [], [], []
     filas_invalidas = []
+    advertencias = []
     for numero_fila, fila in enumerate(
         filas[indice_cabecera + 1:], start=indice_cabecera + 2
     ):
+        reparada = False
+        if len(fila) != len(cabecera) and any(valor.strip() for valor in fila[1:]):
+            indice_descripcion = columnas["descripción"]
+            sobrantes = len(fila) - len(cabecera)
+            if sobrantes < 0 or not {"referencia", "secuencial"} <= columnas.keys():
+                raise ErrorOperacion(f"⚠️ Número de columnas incorrecto en la fila {numero_fila} de Banrural.")
+            if any(fragmento.strip().isdigit() for fragmento in fila[indice_descripcion + 1:indice_descripcion + sobrantes + 1]):
+                raise ErrorOperacion(f"⚠️ No se pueden recuperar con seguridad las columnas de la fila {numero_fila} de Banrural.")
+            fila = (fila[:indice_descripcion]
+                    + [",".join(fila[indice_descripcion:indice_descripcion + sobrantes + 1])]
+                    + fila[indice_descripcion + sobrantes + 1:])
+            reparada = True
+            montos = [convertir_monto(fila[columnas[c]]) for c in
+                      ("débito (-)", "crédito (+)", "saldo contable", "saldo disponible")
+                      if c in columnas]
+            if (saldo_final is None or _fecha_bancaria(fila[columnas["fecha"]]) is None
+                    or any(m is None for m in montos)
+                    or montos[0] < 0 or montos[1] < 0
+                    or (montos[0] != 0) == (montos[1] != 0)
+                    or saldo_final + montos[1] - montos[0] != montos[2]
+                    or fila[columnas["cheque propio / local / efectivo"]].strip().upper() not in {"", "EFECTIVO", "LOCAL"}
+                    or not fila[columnas["referencia"]].strip().isdigit()
+                    or not fila[columnas["secuencial"]].strip().isdigit()):
+                raise ErrorOperacion(f"⚠️ No se pueden recuperar con seguridad las columnas de la fila {numero_fila} de Banrural.")
         fila += [""] * (len(cabecera) - len(fila))
         fecha = fila[columnas["fecha"]].strip()
         descripcion = fila[columnas["descripción"]].strip()
@@ -478,6 +503,8 @@ def _leer_csv_banrural(archivo):
             raise ErrorOperacion(
                 f"⚠️ El saldo contable de Banrural no cuadra en la fila {numero_fila}."
             )
+        if reparada:
+            advertencias.append(f"Fila {numero_fila}: se recuperó la descripción con comas: {descripcion}")
         saldo_final = saldo_fila
         if tiene_debito:
             movimiento = {
@@ -511,6 +538,7 @@ def _leer_csv_banrural(archivo):
         "notas_credito": [],
         "notas_debito": notas_debito,
         "filas_invalidas": filas_invalidas,
+        "advertencias": advertencias,
         "cuenta_numero": cuenta_numero,
         "cuenta_nombre": cuenta_nombre,
         "fecha_inicio": fecha_inicio,
@@ -1430,6 +1458,7 @@ def obtener_conciliacion(cuenta_id=None, archivo_banco=None, fecha_corte=None):
             "cheques_cobrados": cheques_cobrados,
             "cheques_transito": cheques_transito,
             "cheques_banco_sin_registro": cheques_banco_sin_registro,
+            "advertencias": estado_banco.get("advertencias", []),
             "filas_invalidas": filas_invalidas,
             "depositos_no_ingresados": depositos_no_ingresados,
             "notas_debito_no_ingresadas": notas_debito_no_ingresadas,
